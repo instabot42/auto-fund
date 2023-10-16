@@ -189,6 +189,8 @@ class Bitfinex {
         const messageToSign = `/api${path}${nonce}${body}`
         const signature = this.signMessage(messageToSign)
 
+        // debug(`${method} ${path} - ${nonce}`)
+
         // put the required data in the headers
         const headers = {
             'Content-Type': 'application/json',
@@ -212,6 +214,10 @@ class Bitfinex {
             if (error.response) {
                 debug(`Bitfinex REST API error response. Status Code: ${error.response.status}`)
                 debug(error.response.data)
+
+                if (error.response.status === 500) {
+                    this.msgId = Date.now()
+                }
             } else if (error.request) {
                 debug('Request Error making REST API request to Bitfinex (exchange down?)')
             } else {

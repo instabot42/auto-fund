@@ -6,6 +6,8 @@ class App {
     constructor(exchange) {
         this.ex = exchange
         this.timer = null
+
+        this.minImprovement = config.get('minImprovement')
     }
 
     /**
@@ -56,7 +58,9 @@ class App {
      * @returns
      */
     orderBookCheaperThan(orderBook, rate) {
-        return orderBook.filter((el) => el.rate < rate)
+        // adjust the rate to ensure we find something cheaper by enough to bother
+        const targetRate = rate - this.minImprovement
+        return orderBook.filter((el) => el.rate <= targetRate)
     }
 
     /**
@@ -123,9 +127,16 @@ class App {
         }
 
         // report it
+        const seeking = borrows[0].rate - this.minImprovement
         debug(`Found ${i} active borrows.`)
         debug(`Most expensive Borrow  : ${borrows[0].rate.toFixed(8)} (${this.toApr(borrows[0].rate)}% APR)`)
+        debug(`Seeking                : ${seeking.toFixed(8)} (${this.toApr(seeking)}% APR) or better`)
         debug(`Cheapest offered       : ${book[0].rate.toFixed(8)} (${this.toApr(book[0].rate)}% APR)`)
+
+        if (book[0].rate > seeking) {
+            debug(`                       : Too expensive for now`)
+            return
+        }
 
         // try and replace as much as we can
         while (i > 0) {
@@ -155,7 +166,7 @@ class App {
             i -= 1
         }
 
-        debug('Could not replace any borrowing - too expensive')
+        debug(`                       : Couldn't find matching offers for now`)
     }
 
     /**
@@ -166,7 +177,7 @@ class App {
         try {
             // log the time
             const now = new Date()
-            debug(`\nUpdating at ${now.toISOString()}`)
+            debug(`\nUpdating at ${now.toString()}`)
 
             // Find out current borrowing (most expensive first)
             const borrows = await this.ex.getCurrentInUseBorrows()
