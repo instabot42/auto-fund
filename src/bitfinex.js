@@ -174,7 +174,7 @@ class Bitfinex {
     async httpCall(m, path, params = {}) {
         // Check we have some keys
         if (this.key === '' || this.secret === '') {
-            debug('Set up API keys in config (config/local.json) to call authenticated endpoints')
+            debug('Set up API keys in config (config/local.js) to call authenticated endpoints')
             throw new Error('No API Keys Provided')
         }
 

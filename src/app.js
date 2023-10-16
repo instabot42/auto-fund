@@ -192,8 +192,9 @@ class App {
             // see if we can replace anything
             await this.replaceBorrowingIfCheaper(borrows, book)
         } catch (err) {
-            debug('Error in onTimer.')
-            debug(err)
+            debug('Error in onTimer...')
+            debug(err.message)
+            // debug(err)
         }
     }
 }
