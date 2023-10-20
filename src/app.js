@@ -105,6 +105,38 @@ class App {
     }
 
     /**
+     * Find the timestamp of the first borrow to be returned
+     * @param {*} borrows
+     * @returns
+     */
+    nextExpiry(borrows) {
+        // pick a start point 120 days in the future
+        const future = Date.now() + 1000 * 60 * 60 * 24 * 120
+
+        // find the borrow that will expire the soonest
+        return borrows.reduce((soonest, b) => (b.expiresAt < soonest ? b.expiresAt : soonest), future)
+    }
+
+    /**
+     * Time for humans
+     * @param {*} t
+     * @returns
+     */
+    timeRemainingStr(t) {
+        const now = Date.now()
+        const timeRemaining = (t - now) / 1000
+        if (timeRemaining < 60) {
+            return 'a few seconds'
+        } else if (timeRemaining < 60 * 60) {
+            return `${Math.floor(timeRemaining / 60)} m`
+        } else if (timeRemaining < 60 * 60 * 24 * 3) {
+            return `${Math.ceil(timeRemaining / (60 * 60))} hr`
+        }
+
+        return `${Math.ceil(timeRemaining / (60 * 60 * 24))} d`
+    }
+
+    /**
      * Helper - covert a rate to an annual percent rate
      * @param {*} rate
      * @returns
@@ -126,10 +158,17 @@ class App {
             return
         }
 
+        // first expiries time
+        const nextExpiry = this.nextExpiry(borrows)
+        const timeRemaining = this.timeRemainingStr(nextExpiry)
+
+        // top borrow
+        const top = borrows[0]
+
         // report it
         const seeking = borrows[0].rate - this.minImprovement
-        debug(`Found ${i} active borrows.`)
-        debug(`Most expensive Borrow  : ${borrows[0].rate.toFixed(8)} (${this.toApr(borrows[0].rate)}% APR)`)
+        debug(`Found ${i} active borrows. Next expiry in ${timeRemaining}`)
+        debug(`Most expensive Borrow  : ${top.rate.toFixed(8)} (${this.toApr(top.rate)}% APR)`)
         debug(`Seeking                : ${seeking.toFixed(8)} (${this.toApr(seeking)}% APR) or better`)
         debug(`Cheapest offered       : ${book[0].rate.toFixed(8)} (${this.toApr(book[0].rate)}% APR)`)
 

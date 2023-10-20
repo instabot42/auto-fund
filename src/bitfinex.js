@@ -42,7 +42,9 @@ class Bitfinex {
                 rate: c[11],
                 period: c[12],
                 createdAt: c[3],
-                expiresAt: c[3] + (c[12] + 1000 * 60 * 60 * 24),
+                updatedAt: c[4],
+                openedAt: c[13],
+                expiresAt: c[13] + c[12] * 1000 * 60 * 60 * 24,
                 amount: c[5],
                 symbol: c[1],
                 side: c[2] < 0 ? 'borrower' : c[2] > 0 ? 'lender' : 'both',
@@ -71,11 +73,7 @@ class Bitfinex {
             len: '25',
         }
 
-        const book = await this.httpCallPublic(
-            'get',
-            `/v2/book/${this.symbol}/${precision}`,
-            params
-        )
+        const book = await this.httpCallPublic('get', `/v2/book/${this.symbol}/${precision}`, params)
 
         // Only return the asks (amount > 0)
         return book
