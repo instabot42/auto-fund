@@ -36,29 +36,57 @@ class Bitfinex {
         const path = `/v2/auth/r/funding/credits/${this.symbol}`
         const credits = await this.httpCall('post', path)
 
-        return credits
-            .map((c) => ({
-                id: c[0],
-                rate: c[11],
-                period: c[12],
-                createdAt: c[3],
-                updatedAt: c[4],
-                openedAt: c[13],
-                expiresAt: c[13] + c[12] * 1000 * 60 * 60 * 24,
-                amount: c[5],
-                symbol: c[1],
-                side: c[2] < 0 ? 'borrower' : c[2] > 0 ? 'lender' : 'both',
-                rateType: c[8].toLowerCase(),
-                positionPair: c[21],
-            }))
-            .sort((a, b) => {
-                let s = b.rate - a.rate
-                if (s === 0) {
-                    s = b.period - a.period
-                }
+        return this.transformBorrows(credits)
+    }
 
-                return s
-            })
+    /**
+     * Get the current list of borrowed funds, sorted as most expensive first
+     * @returns
+     */
+    async getUnusedBorrows() {
+        // https://docs.bitfinex.com/reference/rest-auth-funding-loans
+        // POST /v2/auth/r/funding/credits/{Symbol}
+        const path = `/v2/auth/r/funding/loans/${this.symbol}`
+        const loans = await this.httpCall('post', path)
+
+        return this.transformBorrows(loans)
+    }
+
+    /**
+     * Remap and sort borrowing / loan information from the API
+     * @param {*} borrows
+     * @returns
+     */
+    transformBorrows(borrows) {
+        return (
+            borrows
+                // Just borrowing (not lending)
+                .filter((c) => c[2] <= 0)
+                // Name properties
+                .map((c) => ({
+                    id: c[0],
+                    rate: c[11],
+                    period: c[12],
+                    createdAt: c[3],
+                    updatedAt: c[4],
+                    openedAt: c[13],
+                    expiresAt: c[13] + c[12] * 1000 * 60 * 60 * 24,
+                    amount: c[5],
+                    symbol: c[1],
+                    side: c[2] < 0 ? 'borrower' : c[2] > 0 ? 'lender' : 'both',
+                    rateType: c[8].toLowerCase(),
+                    positionPair: c[21] ? c[21] : null,
+                }))
+                // Sort by rate / period
+                .sort((a, b) => {
+                    let s = b.rate - a.rate
+                    if (s === 0) {
+                        s = b.period - a.period
+                    }
+
+                    return s
+                })
+        )
     }
 
     /**

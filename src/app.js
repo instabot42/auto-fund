@@ -8,6 +8,10 @@ class App {
         this.timer = null
 
         this.minImprovement = config.get('minImprovement')
+
+        // Tracking if we need to release unused borrowing or not
+        this.ticksSinceChange = 0
+        this.prevTotalBorrowed = 0
     }
 
     /**
@@ -198,6 +202,7 @@ class App {
                 await this.returnBorrowing(subset)
 
                 // stop looking
+                this.ticksSinceChange = 0
                 return
             }
 
@@ -218,8 +223,33 @@ class App {
             const now = new Date()
             debug(`\nUpdating at ${now.toString()}`)
 
-            // Find out current borrowing (most expensive first)
+            // Find the used and unused borrowings...
+            const unused = await this.ex.getUnusedBorrows()
             const borrows = await this.ex.getCurrentInUseBorrows()
+
+            // Sun them up
+            const totalUnused = unused.reduce((sum, b) => sum + b.amount, 0)
+            const totalBorrowed = borrows.reduce((sum, b) => sum + b.amount, 0)
+            debug(`Taken Using: ${totalBorrowed.toFixed(2)}, Taken Unused: ${totalUnused.toFixed(2)}`)
+
+            // Has anything changed?
+            if (this.prevTotalBorrowed != totalBorrowed) {
+                if (this.ticksSinceChange > 0) {
+                    debug(`Borrowing changed. Now: ${totalBorrowed.toFixed(2)}. Was ${this.prevTotalBorrowed.toFixed(2)}`)
+                    debug(`Been ${this.ticksSinceChange} ticks since we changed anything, so exchange changed funding mix`)
+                    debug('Release the following unused borrowings...')
+                    debug(unused)
+                }
+
+                // reset the change tracker
+                this.prevTotalBorrowed = totalBorrowed
+                this.ticksSinceChange = 0
+            }
+
+            // Assume no changes will be made this this stage
+            this.ticksSinceChange += 1
+
+            // If we have no used borrowing, stop
             if (borrows.length === 0) {
                 debug('no borrowing - waiting...')
                 return
