@@ -10,27 +10,53 @@ Ideally this will keep your funding costs down and minimise the rates you pay.
 
 The bot will continue to check at an interval of your choice to ensure you can make the most of any cheap funding that turns up.
 
-By default the bot will run in 'Dry Run' mode, where it won't actually make any changes to your account. You will have to change this settings in the config to allow the bot to make changes. Useful for the initial run, or to just give you an idea of what it would be doing with your funding...
+### Setup
 
-You will need to create some API keys on Bitfinex to use this.
-The keys will need the following permissions from the Margin Funding section...
-
-* 'Get Funding statuses and info' permission to get your existing funding
-* 'Offer, cancel and close funding' if you want to allow the bot to replace expensive funding with cheaper offers. You don't need this permission if you are just running in 'dryRun' mode.
-
-
-To use it...
+Clone the repo and switch to the repos folder...
 
 ```
+git clone https://github.com/instabot42/auto-fund.git
+cd auto-fund
+```
 
-Install dependencies with `npm ci`
-
-Copy `config/default.js` to `config/local.js`
-
-Edit `config/local.js` and add your Bitfinex API keys and adjust any other settings.
-
-Start the app using `npm run debug`
-
-The logs will show the steps being taken
+Install dependencies...
 
 ```
+npm ci
+```
+
+Set up your config...
+
+```
+cp config/default.js config/local.js
+```
+
+edit `config/local.js` in any editor. You will need a set of API keys from Bitfinex, so the bot can manage your funding. These API keys only need very limited permissions, so create the keys with only the following permissions...
+
+* 'Get Funding statuses and info' permission so the bot can find out about your current open funding.
+* 'Offer, cancel and close funding', so the bot can adjust your funding. Note: this permission is not needed if you are running in 'dry run' mode (see below)
+
+Put the new key and secret into the `local.js` config file.
+
+### Dry Run Mode
+
+By default the bot will operate in Dry Run mode. When this mode is enabled, the bot will not make any changes to your account. It is essentially in read only mode (and you can use API keys that only have read permission). When running in this mode it will report the status of your funding and indicate what it would have done if it had permission, so you can review it.
+
+When you want to run the bot for real, edit `local.js` and change `dryRun` to false.
+
+### Other Settings
+
+*interval* Determines how often the bot will attempt to adjust your funding. It defaults to once a minute. The number is in milliseconds.
+
+*minImprovement* How much better should the funding rate be before the bot will bother trying to make a change.
+
+### Running the bot
+
+When your settings are good, you can run the bot using...
+
+```
+npm run debug
+```
+
+This will produce a fair amount of logging to show you progress.
+
