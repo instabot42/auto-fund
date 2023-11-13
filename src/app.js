@@ -236,9 +236,8 @@ class App {
             if (this.prevTotalBorrowed != totalBorrowed) {
                 if (this.ticksSinceChange > 0) {
                     debug(`Borrowing changed. Now: ${totalBorrowed.toFixed(2)}. Was ${this.prevTotalBorrowed.toFixed(2)}`)
-                    debug(`Been ${this.ticksSinceChange} ticks since we changed anything, so exchange changed funding mix`)
-                    debug('Release the following unused borrowings...')
-                    debug(unused)
+                    debug(`Been ${this.ticksSinceChange} ticks since we changed anything, so exchange changed funding mix.`)
+                    await this.returnBorrowing(unused)
                 }
 
                 // reset the change tracker
