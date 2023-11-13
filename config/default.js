@@ -15,9 +15,9 @@ module.exports = {
         symbol: 'fUSD',
     },
 
-    // How often should the funding be updated (in ms). Defaults to 10m
-    // Should be > 1m
-    interval: 19 * 60 * 1000,
+    // How often should the funding be updated (in ms). Defaults to 1m
+    // Should be >= 1m
+    interval: 1 * 60 * 1000,
 
     // Only replace funding if we can get a better rate by at least this much
     // This will be used with the daily interest rate.
