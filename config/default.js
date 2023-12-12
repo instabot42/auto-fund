@@ -25,6 +25,10 @@ module.exports = {
     // though shown as a percentage in the Bitfinex UI at 0.018
     minImprovement: 0.00000001,
 
+    // The min amount to borrow in a single transaction (to avoid fragmenting your borrowing)
+    // this is in units of the borrowing currency (eg fUSD in this config above)
+    minBorrowSize: 150,
+
     // when set to true, no new borrowing will be taken out and no existing borrowing will be returned
     // Setting this to on will ensure that the bot makes no changes to your account
     // it will still report to you, in the logs, what it would have done.

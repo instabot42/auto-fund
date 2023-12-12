@@ -1,8 +1,8 @@
 const crypto = require('node:crypto')
 const config = require('config')
 const axios = require('axios')
-const Debug = require('debug')
-const debug = Debug('autoFund:Bitfinex')
+const logger = require('./log')
+const log = logger('bitfinex')
 
 class Bitfinex {
     /**
@@ -18,11 +18,11 @@ class Bitfinex {
         this.msgId = Date.now()
 
         // should we change anything or not
-        debug(`Bitfinex starting, tracking ${this.symbol}`)
+        log(`Bitfinex starting, tracking ${this.symbol}`)
 
         this.dryRun = !!config.get('dryRun')
         if (this.dryRun) {
-            debug('\n============\nDRY RUN - WILL NOT CHANGE BORROWING\n============\n')
+            log('\n============\nDRY RUN - WILL NOT CHANGE BORROWING\n============\n')
         }
     }
 
@@ -123,8 +123,8 @@ class Bitfinex {
         // /v2/auth/w/funding/close
         const params = { id }
         if (this.dryRun) {
-            debug('DRYRUN: Would have closed funding here')
-            debug(params)
+            log('DRYRUN: Would have closed funding here')
+            log(params)
             return
         }
 
@@ -151,8 +151,8 @@ class Bitfinex {
         }
 
         if (this.dryRun) {
-            debug('DRYRUN: Would have placed order for new funding')
-            debug(params)
+            log('DRYRUN: Would have placed order for new funding')
+            log(params)
             return
         }
 
@@ -182,10 +182,11 @@ class Bitfinex {
         }
 
         try {
+            log(`## ${m} ${path}`)
             const response = await axios(request)
             return response.data
         } catch (err) {
-            debug(err)
+            log(err)
             throw err
         }
     }
@@ -200,7 +201,7 @@ class Bitfinex {
     async httpCall(m, path, params = {}) {
         // Check we have some keys
         if (this.key === '' || this.secret === '') {
-            debug('Set up API keys in config (config/local.js) to call authenticated endpoints')
+            log('Set up API keys in config (config/local.js) to call authenticated endpoints')
             throw new Error('No API Keys Provided')
         }
 
@@ -234,20 +235,21 @@ class Bitfinex {
         }
 
         try {
+            log(`## ${m} ${path}`)
             const response = await axios(request)
             return response.data
         } catch (error) {
             if (error.response) {
-                debug(`Bitfinex REST API error response. Status Code: ${error.response.status}`)
-                debug(error.response.data)
+                log(`Bitfinex REST API error response. Status Code: ${error.response.status}`)
+                log(error.response.data)
 
                 if (error.response.status === 500) {
                     this.msgId = Date.now()
                 }
             } else if (error.request) {
-                debug('Request Error making REST API request to Bitfinex (exchange down?)')
+                log('Request Error making REST API request to Bitfinex (exchange down?)')
             } else {
-                debug('Error making REST API request to Bitfinex')
+                log('Error making REST API request to Bitfinex')
             }
 
             throw new Error('Bitfinex REST API Error. Call rejected')
