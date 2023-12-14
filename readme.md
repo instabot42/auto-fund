@@ -46,9 +46,11 @@ When you want to run the bot for real, edit `local.js` and change `dryRun` to fa
 
 ### Other Settings
 
-*interval* Determines how often the bot will attempt to adjust your funding. It defaults to once a minute. The number is in milliseconds.
+*interval* Determines how often the bot will attempt to adjust your funding. It defaults to once a minute. Set this to zero, and the bot will attempt to adjust your funding once, then exit. The number is in milliseconds.
 
-*minImprovement* How much better should the funding rate be before the bot will bother trying to make a change.
+*minImprovement* How much better should the funding rate be before the bot will bother trying to make a change. The bot will query your most expensive in-use funding rate and subtract this value from it, to get a target rate. It will then look for available funding at a rate lower than this target value.
+
+*minBorrowSize* What is the smallest amount the bot is allowed to ask for when looking to change some funding. This is in units of the funding currency in use and defaults to 150.
 
 ### Running the bot
 

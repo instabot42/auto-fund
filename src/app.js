@@ -2,11 +2,17 @@ const config = require('config')
 const logger = require('./log')
 const log = logger('app')
 
+const apr = (v) => (v * 100 * 365).toFixed(4)
+const f8 = (v) => v.toFixed(8)
+const f4 = (v) => v.toFixed(4)
+const f2 = (v) => v.toFixed(2)
+const f0 = (v) => v.toFixed(0)
 
 class App {
     constructor(exchange) {
         this.ex = exchange
         this.timer = null
+        this.interval = config.get('interval')
 
         this.minImprovement = config.get('minImprovement')
         this.minBorrowSize = config.get('minBorrowSize')
@@ -19,16 +25,22 @@ class App {
     /**
      * Start the system checking your borrowing
      */
-    start() {
-        const interval = config.get('interval')
-        const inMinutes = interval / 1000 / 60
-        log(`Updating funding every ${interval}ms (about every ${inMinutes.toFixed(0)}m)`)
-
+    async start() {
         // Process the funding book right away
-        this.onTimer()
+        await this.onTimer()
+
+        // If no interval is defined, stop now
+        if (this.interval === 0) {
+            log('No interval defined, so stopping now.')
+            return
+        }
+
+        // Say we are starting a timer
+        const inMinutes = this.interval / 1000 / 60
+        log(`Starting Timer. Updating funding every ${this.interval}ms (about every ${f2(inMinutes)}m)`)
 
         // then update on an interval
-        this.timer = setInterval(() => this.onTimer(), interval)
+        this.timer = setInterval(() => this.onTimer(), this.interval)
     }
 
     /**
@@ -84,14 +96,13 @@ class App {
             period = Math.min(period, orderBook[i].period)
             const toBorrow = Math.min(remaining, orderBook[i].amount)
             const rate = orderBook[i].rate
-            const apr = this.toApr(orderBook[i].rate)
-            log(`>> Borrow ${toBorrow} at a rate of ${rate.toFixed(8)} (${apr}% APR)`)
+            log(`++ Borrow ${toBorrow} at a rate of ${f8(rate)} (${apr(orderBook[i].rate)}% APR)`)
             remaining -= toBorrow
             lastRate = rate
             i += 1
         }
 
-        log(`>> Requesting total borrowing of ${qty}...`)
+        log(`++ Requesting total borrowing of ${qty}...`)
         await this.ex.borrowFunds(qty, lastRate, period)
     }
 
@@ -103,9 +114,8 @@ class App {
         // Attempt to return all the borrowing given to us
         for (const el of toReturn) {
             const rate = el.rate
-            const apr = this.toApr(rate)
-            log(`== Return borrowing id ${el.id}`)
-            log(`   ${el.amount} at a rate of ${rate.toFixed(8)} (${apr}% APR)`)
+            log(`-- Return borrowing id ${el.id}`)
+            log(`   ${el.amount} at a rate of ${f8(rate)} (${apr(rate)}% APR)`)
             await this.ex.fundingClose(el.id)
         }
     }
@@ -143,15 +153,6 @@ class App {
     }
 
     /**
-     * Helper - covert a rate to an annual percent rate
-     * @param {*} rate
-     * @returns
-     */
-    toApr(rate) {
-        return (rate * 100 * 365).toFixed(4)
-    }
-
-    /**
      * Try and find a set of existing borrowing that could be replaced with cheaper funding from the order book
      * @param {*} borrows
      * @param {*} book
@@ -175,15 +176,15 @@ class App {
         // report it
         const seeking = borrows[0].rate - this.minImprovement
         const lowRate = book[0].rate
-        const scaledRate = borrows.reduce((sum, b) => sum + (b.rate * b.amount), 0)
+        const scaledRate = borrows.reduce((sum, b) => sum + b.rate * b.amount, 0)
         const totalBorrowed = borrows.reduce((sum, b) => sum + b.amount, 0)
         const avgRate = scaledRate / totalBorrowed
         log(`Found ${i} active borrows. Next expiry in ${timeRemaining}`)
-        log(`Most expensive Borrow  : ${top.rate.toFixed(8)} (${this.toApr(top.rate)}% APR). ${top.amount.toFixed(4)} ${this.ex.symbol}`)
-        log(`Best Borrow            : ${last.rate.toFixed(8)} (${this.toApr(last.rate)}% APR). ${last.amount.toFixed(4)} ${this.ex.symbol}`)
-        log(`Weighted Avg Borrow    : ${avgRate.toFixed(8)} (${this.toApr(avgRate)}% APR). ${totalBorrowed.toFixed(4)} ${this.ex.symbol}`)
-        log(`\nCheapest offered       : ${lowRate.toFixed(8)} (${this.toApr(lowRate)}% APR). ${book[0].amount.toFixed(2)} available`)
-        log(`Want <= than           : ${seeking.toFixed(8)} (${this.toApr(seeking)}% APR).`)
+        log(`Most expensive Borrow  : ${f8(top.rate)} (${apr(top.rate)}% APR). ${f4(top.amount)} ${this.ex.symbol}`)
+        log(`Best Borrow            : ${f8(last.rate)} (${apr(last.rate)}% APR). ${f4(last.amount)} ${this.ex.symbol}`)
+        log(`Weighted Avg Borrow    : ${f8(avgRate)} (${apr(avgRate)}% APR). ${f4(totalBorrowed)} ${this.ex.symbol}`)
+        log(`\nCheapest offered       : ${f8(lowRate)} (${apr(lowRate)}% APR). ${f4(book[0].amount)} available`)
+        log(`Want <= than           : ${f8(seeking)} (${apr(seeking)}% APR).`)
 
         if (book[0].rate > seeking) {
             log(`                       : Too expensive for now`)
@@ -198,13 +199,17 @@ class App {
             const cheaperBook = this.orderBookCheaperThan(book, cost.bestRate)
             const available = cheaperBook.reduce((total, el) => total + el.amount, 0)
 
-            log(`Attempt to replace top ${i} of ${borrows.length} borrows.`)
-            log(`- Found ${available.toFixed(2)} available cheaper than ${cost.bestRate.toFixed(8)} (${this.toApr(cost.bestRate)}% APR). Need ${cost.totalBorrowed.toFixed(2)}`)
+            log(`Attempt to replace top ${i} of ${borrows.length} borrows...`)
+            log(
+                `>> Found ${f2(available)} available cheaper than ${f8(cost.bestRate)} (${apr(cost.bestRate)}% APR). Need ${f2(
+                    cost.totalBorrowed
+                )}`
+            )
 
             if (cost.totalBorrowed >= this.minBorrowSize) {
                 if (available > cost.totalBorrowed) {
                     // Allocate a bit extra for the cost of borrowing the funds for an hour
-                    const extraForFunding = cost.totalBorrowed * top.rate / 24
+                    const extraForFunding = (cost.totalBorrowed * top.rate) / 24
 
                     // borrow funds to cover the stuff we are replacing
                     await this.borrowFunds(book, cost.totalBorrowed + extraForFunding)
@@ -245,19 +250,28 @@ class App {
             // Sun them up
             const totalUnused = unused.reduce((sum, b) => sum + b.amount, 0)
             const totalBorrowed = borrows.reduce((sum, b) => sum + b.amount, 0)
-            log(`Taken Using : ${totalBorrowed.toFixed(2)}\nTaken Unused: ${totalUnused.toFixed(2)}`)
+            log(`Taken Using : ${f2(totalBorrowed)}\nTaken Unused: ${f2(totalUnused)}`)
 
             // Has anything changed?
             if (this.prevTotalBorrowed != totalBorrowed) {
                 if (this.ticksSinceChange > 0) {
-                    log(`Borrowing changed. Now: ${totalBorrowed.toFixed(2)}. Was ${this.prevTotalBorrowed.toFixed(2)}`)
+                    log(`Borrowing changed. Now: ${f2(totalBorrowed)}. Was ${f2(this.prevTotalBorrowed)}`)
                     log(`Been ${this.ticksSinceChange} ticks since we changed anything, so exchange changed funding mix.`)
+                    log(`Return unused borrowing...`)
                     await this.returnBorrowing(unused)
                 }
 
                 // reset the change tracker
                 this.prevTotalBorrowed = totalBorrowed
                 this.ticksSinceChange = 0
+            }
+
+            // pick a long time (say 2 hours) and if nothing changes in that long, anything unused must not be needed any more
+            const longTime = 1000 * 60 * 60 * 2
+            if (totalUnused > 0 && this.ticksSinceChange * this.interval > longTime) {
+                log('Unused borrows have been left unallocated for a long time')
+                log('Unlikely they are needed. Returning them...')
+                await this.returnBorrowing(unused)
             }
 
             // Assume no changes will be made this this stage
@@ -274,10 +288,11 @@ class App {
 
             // see if we can replace anything
             await this.replaceBorrowingIfCheaper(borrows, book)
+            log('Updated complete')
         } catch (err) {
             log('Error in onTimer...')
             log(err.message)
-            // debug(err)
+            console.log(err)
         }
     }
 }
