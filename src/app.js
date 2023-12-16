@@ -243,6 +243,9 @@ class App {
             const now = new Date()
             log(`\nUpdating at ${now.toString()}`)
 
+            // Clear any orders that have not happened
+            await this.ex.cancelAllFundingOffers()
+
             // Find the used and unused borrowings...
             const unused = await this.ex.getUnusedBorrows()
             const borrows = await this.ex.getCurrentInUseBorrows()

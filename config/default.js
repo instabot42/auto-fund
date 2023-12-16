@@ -1,4 +1,3 @@
-
 /**
  * Copy this file to config/local.js (which is not under source control)
  *
@@ -13,6 +12,14 @@ module.exports = {
 
         // The symbol that borrowing will be monitor on
         symbol: 'fUSD',
+
+        // true to cancel all pending funding offers (orders in the book to borrow)
+        // This ensures the bot isn't going to see funding taken out unexpectadly.
+        // Occasionally when the bot asks to borrow at a rate, the offer is removed before
+        // the order can be executed, which results in the offer sitting on the book waiting to fill.
+        // By having this set to true, such orders are auto cleaned up.
+        // Set this to false if you intend to manually add orders to the orderbook for some reason, and want them left along
+        cancelPendingOffers: true,
     },
 
     // How often should the funding be updated (in ms). Defaults to 1m

@@ -13,6 +13,7 @@ class Bitfinex {
         this.key = config.get('bitfinex.key')
         this.secret = config.get('bitfinex.secret')
         this.symbol = config.get('bitfinex.symbol')
+        this.cancelPendingOffers = config.get('bitfinex.cancelPendingOffers')
 
         // message id / nonce
         this.msgId = Date.now()
@@ -157,6 +158,27 @@ class Bitfinex {
         }
 
         const r = await this.httpCall('post', '/v2/auth/w/funding/offer/submit', params)
+    }
+
+    /**
+     * Cancels all open funding offers
+     * @returns
+     */
+    async cancelAllFundingOffers() {
+        // https://docs.bitfinex.com/reference/rest-auth-cancel-all-funding-offers
+        // /v2/auth/w/funding/offer/cancel/all
+        if (!this.cancelPendingOffers) {
+            // if the feature is disabled, dont
+            return
+        }
+
+        // just cancel everything...
+        if (this.dryRun) {
+            log('DRYRUN: Would have cancelled all pending funding offers')
+            return
+        }
+
+        const r = await this.httpCall('post', '/v2/auth/w/funding/offer/cancel/all', {})
     }
 
     /**
