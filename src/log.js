@@ -1,5 +1,20 @@
 const chalk = require('chalk')
 
+/*
+
+// A simple logging function.
+// use it like so...
+
+const logger = require('./log')
+const log = logger('prefix (eg module name)')
+
+const value = 42
+const obj = { x: 23, y: 'string' }
+
+log('a message', value, obj)
+
+*/
+
 const colours = {
     base: chalk.cyan,
     number: chalk.green,
@@ -75,6 +90,7 @@ function toMsg(msg) {
         }
 
         if (msg instanceof Error) {
+            console.log(msg)
             return msg.message
         }
 

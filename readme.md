@@ -8,7 +8,7 @@ This bot will scan all the borrowings you have and compare them to the best avai
 
 Ideally this will keep your funding costs down and minimise the rates you pay.
 
-The bot will continue to check at an interval of your choice to ensure you can make the most of any cheap funding that turns up.
+The bot will monitor the funding market, capturing any opportunities it can.
 
 ### Setup
 
@@ -46,11 +46,11 @@ When you want to run the bot for real, edit `local.js` and change `dryRun` to fa
 
 ### Other Settings
 
-*interval* Determines how often the bot will attempt to adjust your funding. It defaults to once a minute. Set this to zero, and the bot will attempt to adjust your funding once, then exit. The number is in milliseconds.
+*interval* Determines how often the bot will log out a summary. The number is in milliseconds.
 
 *minImprovement* How much better should the funding rate be before the bot will bother trying to make a change. The bot will query your most expensive in-use funding rate and subtract this value from it, to get a target rate. It will then look for available funding at a rate lower than this target value.
 
-*minBorrowSize* What is the smallest amount the bot is allowed to ask for when looking to change some funding. This is in units of the funding currency in use and defaults to 150.
+*minBorrowSize* What is the smallest amount the bot is allowed to ask for when looking to change some funding. This is in units of the funding currency in use and defaults to 150. The exchange has a min order size of around $150 equivalent.
 
 ### Running the bot
 

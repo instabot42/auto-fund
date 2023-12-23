@@ -9,46 +9,354 @@ const f2 = (v) => v.toFixed(2)
 const f0 = (v) => v.toFixed(0)
 
 class App {
-    constructor(exchange) {
-        this.ex = exchange
-        this.timer = null
-        this.interval = config.get('interval')
+    /**
+     *
+     * @param {*} socket
+     */
+    constructor(socket) {
+        this.socket = socket
 
+        // Set up handlers on the socket
+        this.socket.on('update-offer', (offer) => this.onUpdateOffer(offer))
+        this.socket.on('cancel-offer', (offer) => this.onCancelOffer(offer))
+
+        this.socket.on('update-borrow', (borrow) => this.onUpdateBorrow(borrow))
+        this.socket.on('cancel-borrow', (borrow) => this.onCancelBorrow(borrow))
+
+        this.socket.on('update-order', (order) => this.onUpdateOrder(order))
+        this.socket.on('cancel-order', (order) => this.onCancelOrder(order))
+
+        this.socket.on('execute-trade', (trade) => this.onExecuteTrade(trade))
+
+        // some settings
+        this.loggingInterval = config.get('interval')
         this.minImprovement = config.get('minImprovement')
         this.minBorrowSize = config.get('minBorrowSize')
+        this.symbol = config.get('bitfinex.symbol')
 
-        // Tracking if we need to release unused borrowing or not
-        this.ticksSinceChange = 0
-        this.prevTotalBorrowed = 0
+        // the order book and loan book
+        this.borrows = []
+        this.offers = []
+        this.orders = []
+
+        // When switching out borrow, track the changes...
+        this.pending = null
+        this.overBid = 0
+
+        this.pauseUntil = Date.now() + 5000
+        this.eventCount = 0
     }
 
     /**
-     * Start the system checking your borrowing
+     * Called to kick start the process
      */
-    async start() {
-        // Process the funding book right away
-        await this.onTimer()
+    start() {
+        log('Starting...')
+        this.pauseUntil = Date.now() + 5000
+        this.socket.open()
 
-        // If no interval is defined, stop now
-        if (this.interval === 0) {
-            log('No interval defined, so stopping now.')
+        if (this.loggingInterval) {
+            log(`Will log state every ${this.loggingInterval}ms`)
+            setInterval(() => this.onTimer(), this.loggingInterval)
+            setTimeout(() => this.onTimer(), 10000)
+        } else {
+            log('State logging disabled. set `interval` in the config to enable')
+        }
+    }
+
+    /**
+     * Called when an offer is added or updated
+     * @param {*} offer
+     */
+    onUpdateOffer(offer) {
+        // insert and replace the orders at this rate
+        // done as delete + insert
+        this.offers = this.offers.filter((o) => o.rate !== offer.rate)
+        this.offers.push(offer)
+
+        // resort the book, so the cheapest item is first (sorted by rate, then period-longest first)
+        this.sortOffers()
+
+        // we got a new offer. Can we find any borrows that are paying more than this
+        this.replaceBorrowingIfCheaper()
+    }
+
+    /**
+     * Called when an offer is cancelled
+     * @param {*} offer
+     */
+    onCancelOffer(offer) {
+        this.offers = this.offers.filter((o) => o.rate !== offer.rate)
+        this.eventCount += 1
+    }
+
+    /**
+     * Called when a borrow is added or updated
+     * @param {*} borrow
+     */
+    onUpdateBorrow(borrow) {
+        this.borrows = this.borrows.filter((b) => b.id !== borrow.id)
+        this.borrows.push(borrow)
+        this.sortBorrows()
+        this.eventCount += 1
+
+        log(`New Borrow   : ${borrow.ratePercent}% APR (${borrow.rateFixed}). ${borrow.amount.toFixed(4)} type: ${borrow.type}`)
+    }
+
+    /**
+     * Called when a borrow is cancelled
+     * @param {*} borrow
+     */
+    onCancelBorrow(borrow) {
+        this.borrows = this.borrows.filter((b) => b.id !== borrow.id)
+        this.eventCount += 1
+        log(`Return Borrow: ${borrow.ratePercent}% APR (${borrow.rateFixed}). ${borrow.amount.toFixed(4)} type: ${borrow.type}`)
+    }
+
+    /**
+     * A new or updated order has been detected. Could be part filled for example.
+     * @param {*} order
+     */
+    onUpdateOrder(order) {
+        this.orders = this.orders.filter((o) => o.id !== order.id)
+        this.orders.push(order)
+        this.eventCount += 1
+
+        if (this.pending) {
+            this.pending.orderIds = this.pending.orderIds.filter((id) => id !== order.id)
+            this.pending.orderIds.push(order.id)
+        }
+        // log(`New/Updated Order Detected, ${order.amount} at ${order.ratePercent}% id:${order.id}`)
+    }
+
+    /**
+     * An order has been cancelled (filled, closed etc)
+     * @param {*} order
+     */
+    onCancelOrder(order) {
+        this.orders = this.orders.filter((o) => o.id !== order.id)
+        this.eventCount += 1
+        // log(`Cancelled/Filled Order Detected, ${order.amount} at ${order.ratePercent}% id:${order.id}`)
+    }
+
+    /**
+     * Called when a trade is executed
+     * @param {*} trade
+     */
+    onExecuteTrade(trade) {
+        log(
+            `Trade Executed : ${trade.ratePercent}% APR (${trade.rate}). ${trade.amount.toFixed(4)} for ${trade.period} days. ${
+                trade.maker ? 'Maker' : 'Taker'
+            }`
+        )
+        if (this.pending) {
+            this.pending.filledCount += 1
+            this.pending.filledAmount += Math.abs(trade.amount)
+        }
+    }
+
+    /**
+     * Called from time to time to log out the state of things
+     */
+    onTimer() {
+        this.logBorrowStateLite()
+    }
+
+    /**
+     * Try and find a set of existing borrowing that could be replaced with cheaper funding from the order book
+     * @param {*} borrows
+     * @param {*} book
+     * @returns
+     */
+    replaceBorrowingIfCheaper() {
+        // Only continue if we are not in the middle of
+        // changing some borrowing already or paused
+        const now = Date.now()
+        if (now < this.pauseUntil || this.pending !== null) {
             return
         }
 
-        // Say we are starting a timer
-        const inMinutes = this.interval / 1000 / 60
-        log(`Starting Timer. Updating funding every ${this.interval}ms (about every ${f2(inMinutes)}m)`)
+        // get these as local values
+        const borrows = this.borrows
+        const book = this.offers
 
-        // then update on an interval
-        this.timer = setInterval(() => this.onTimer(), this.interval)
+        // see how many borrows we have
+        let i = borrows.length
+        if (i <= 0 || book.length <= 0) {
+            return
+        }
+
+        // Too expensive?
+        const seeking = borrows[0].rate - this.minImprovement
+        if (book[0].rate > seeking) {
+            return
+        }
+
+        // try and replace as much as we can
+        while (i > 0) {
+            // Get a slice of the borrows to try and replace
+            // Start with all of them, and gradually work back until we are testing against only the most expensive borrow
+            const subset = borrows.slice(0, i)
+
+            // Figure out the replace cost and how much we'd need to borrow here
+            const cost = this.replacementCost(subset)
+            const borrowAmount = cost.totalBorrowed
+            const cheaperBook = this.orderBookCheaperThan(book, cost.bestRate)
+            const available = cheaperBook.reduce((total, el) => total + el.amount, 0)
+
+            // If there is enough available in the order book, and it is > min order size, have a go...
+            if (borrowAmount >= this.minBorrowSize && available > borrowAmount) {
+                // Find the optimal rate
+                const targetRate = this.findTargetRateToBorrow(cheaperBook, borrowAmount)
+
+                // report the state of things
+                this.logBorrowState()
+                log('Match Found...')
+                log(`>> Can replace top ${i} of ${borrows.length} borrows...`)
+                log(`>> Needed ${f2(borrowAmount)}. Found ${f2(available)}`)
+                log(`>> Replaces existing at ${apr(cost.bestRate)}% APR (${f8(cost.bestRate)}) or worse`)
+                log(`>> With new at          ${apr(targetRate)}% APR (${f8(targetRate)}) or better\n`)
+
+                // borrow funds to cover the stuff we are replacing
+                this.replaceBorrowing(borrowAmount, targetRate, subset)
+
+                // once we have replaced a set of borrowing, we are done
+                // we can try again in a few seconds.
+                return
+            }
+
+            // try a small subset of the list
+            i -= 1
+        }
     }
 
     /**
-     * Stop the timers, so it will no longer update
+     * Whats the best rate we could offer that would still have enough liquidity to fill our order
+     * @param {*} book
+     * @param {*} amount
+     * @returns
      */
-    stop() {
-        clearInterval(this.timer)
-        this.timer = null
+    findTargetRateToBorrow(book, amount) {
+        // track the rate to borrow at and how much is left to fill
+        let rate = book[0].rate
+        let balance = amount
+
+        // simulate filling all the orders, finding the target rate (eg slippage needed to fill amount)
+        book.forEach((b) => {
+            if (balance > 0) {
+                rate = b.rate
+            }
+
+            balance -= b.amount
+        })
+
+        return rate
+    }
+
+    /**
+     * Trigger the pricess of replacing a set of borrowing with new borrowing
+     * @param {*} amount
+     * @param {*} rate
+     * @param {*} toReplace
+     */
+    async replaceBorrowing(amount, rate, toReplace) {
+        // wait at least as long as the timer
+        const waitFor = 15000
+        this.pauseUntil = Date.now() + waitFor
+
+        // Set up the pending state
+        this.pending = {
+            orderIds: [],
+            amount,
+            filledCount: 0,
+            filledAmount: 0,
+        }
+
+        // Ask to borrow funds
+        log('>>>>>> BEGIN>>')
+        this.borrowFunds(amount, rate)
+
+        // Wait a bit a see if we have any fills
+        let tries = 0
+        while (tries < 10 && this.pending.filledCount === 0) {
+            // wait a while
+            log('...waiting for fill...')
+            await this.sleep(5000)
+            tries += 1
+        }
+
+        // cancel any of the order ids that are still active
+        this.socket.cancelOffers(this.pending.orderIds)
+        if (this.pending.filledCount > 0) {
+            // we got some trades against our order, so return all the borrows we are trying to replace
+            // we might not have filled all of it, but the exchange will take care of that by re-borrowing if needed
+            const toReturn = this.borrowsToReturn(toReplace)
+            await this.borrowReturn(toReturn)
+        }
+
+        // Avoid doing anything for a few seconds and release pending
+        log('>>>>>> END<<')
+        this.pauseUntil = Date.now() + 2000
+        this.pending = null
+    }
+
+    /**
+     * Find the list of borrows to return
+     * @param {*} toReplace
+     * @returns
+     */
+    borrowsToReturn(toReplace) {
+        // Nothing filled, nothing to return
+        if (!this.pending || this.pending.filledCount === 0) {
+            return []
+        }
+
+        // Something filled. find what we can return and what we need to keep
+        let ret = []
+        let amt = this.pending.filledAmount + this.overBid
+        toReplace.forEach((r) => {
+            if (amt >= r.amount) {
+                amt -= r.amount
+                ret.push(r)
+            }
+        })
+
+        // How much was there vs what we are returning
+        const amtReturned = ret.reduce((sum, r) => sum + r.amount, 0)
+        const diffFromReturned = this.pending.filledAmount - amtReturned
+
+        // Keep track of any differences between what we borrow and what we return
+        // This is used above as an error correction to ensure we tend towards replacing the same as we borrow
+        // this is to prevent small fills on a big borrow that can't be returned from building up over time
+        this.overBid += diffFromReturned
+        if (this.overBid <= 0) {
+            this.overBid = 0
+        }
+
+        return ret
+    }
+
+    /**
+     * Borrow some funds please
+     * @param {*} amount
+     * @param {*} rate
+     */
+    borrowFunds(amount, rate) {
+        log(`Borrow ${amount}. Limit Rate ${apr(rate)}% (${rate})`)
+
+        this.socket.borrowFunds(amount, rate)
+    }
+
+    /**
+     * return some borrowing
+     * @param {*} items
+     */
+    async borrowReturn(items) {
+        if (items.length === 0) {
+            return
+        }
+        const ids = items.map((b) => b.id)
+        await this.socket.borrowReturn(ids)
     }
 
     /**
@@ -56,7 +364,7 @@ class App {
      * @param {*} borrows
      */
     replacementCost(borrows) {
-        // Get the best rate on offer in the list we are given
+        // Get the best rate (lowest) on offer in the list we are given
         let bestRate = borrows[0].rate
         bestRate = borrows.reduce((best, el) => (el.rate < best ? el.rate : best), bestRate)
 
@@ -79,45 +387,6 @@ class App {
         // adjust the rate to ensure we find something cheaper by enough to bother
         const targetRate = rate - this.minImprovement
         return orderBook.filter((el) => el.rate <= targetRate)
-    }
-
-    /**
-     * Ask to borrow funds
-     * @param {*} orderBook
-     * @param {*} qty
-     */
-    async borrowFunds(orderBook, qty) {
-        let remaining = qty
-        let i = 0
-        let lastRate = 0
-        let period = 120
-
-        while (remaining > 0 && i < orderBook.length) {
-            period = Math.min(period, orderBook[i].period)
-            const toBorrow = Math.min(remaining, orderBook[i].amount)
-            const rate = orderBook[i].rate
-            log(`++ Borrow ${toBorrow} at a rate of ${f8(rate)} (${apr(orderBook[i].rate)}% APR)`)
-            remaining -= toBorrow
-            lastRate = rate
-            i += 1
-        }
-
-        log(`++ Requesting total borrowing of ${qty}...`)
-        await this.ex.borrowFunds(qty, lastRate, period)
-    }
-
-    /**
-     * Ask to return some existing borrowing
-     * @param {*} toReturn
-     */
-    async returnBorrowing(toReturn) {
-        // Attempt to return all the borrowing given to us
-        for (const el of toReturn) {
-            const rate = el.rate
-            log(`-- Return borrowing id ${el.id}`)
-            log(`   ${el.amount} at a rate of ${f8(rate)} (${apr(rate)}% APR)`)
-            await this.ex.fundingClose(el.id)
-        }
     }
 
     /**
@@ -153,150 +422,90 @@ class App {
     }
 
     /**
-     * Try and find a set of existing borrowing that could be replaced with cheaper funding from the order book
-     * @param {*} borrows
-     * @param {*} book
+     * Sorts the offers into best first
+     * Cheapest offers first, longest period offers first
+     */
+    sortOffers() {
+        this.offers.sort((a, b) => {
+            const s = a.rate - b.rate
+            return s === 0 ? b.period - a.period : s
+        })
+    }
+
+    /**
+     * Sorts the borrows table into order. Worst borrow first
+     * So, high interest, short period first, low interest, long period last
+     */
+    sortBorrows() {
+        this.borrows.sort((a, b) => {
+            const s = b.rate - a.rate
+            return s === 0 ? a.period - b.period : s
+        })
+    }
+
+    /**
+     * Just wait a bit
+     * @param {*} ms
      * @returns
      */
-    async replaceBorrowingIfCheaper(borrows, book) {
-        // see how many borrows we have
-        let i = borrows.length
-        if (i <= 0 || book.length <= 0) {
-            return
-        }
+    sleep(ms) {
+        return new Promise((resolve) => {
+            setTimeout(() => resolve(), ms)
+        })
+    }
+
+    /**
+     * Bundle up all the data for logging, out of the way
+     */
+    logBorrowState() {
+        const borrows = this.borrows
+        const book = this.offers
 
         // first expiries time
-        const nextExpiry = this.nextExpiry(borrows)
-        const timeRemaining = this.timeRemainingStr(nextExpiry)
+        const nextExpiryTime = this.nextExpiry(borrows)
+        const timeRemaining = this.timeRemainingStr(nextExpiryTime)
 
-        // top borrow
         const top = borrows[0]
         const last = borrows[borrows.length - 1]
 
-        // report it
         const seeking = borrows[0].rate - this.minImprovement
+
         const lowRate = book[0].rate
         const scaledRate = borrows.reduce((sum, b) => sum + b.rate * b.amount, 0)
         const totalBorrowed = borrows.reduce((sum, b) => sum + b.amount, 0)
         const avgRate = scaledRate / totalBorrowed
-        log(`Found ${i} active borrows. Next expiry in ${timeRemaining}`)
-        log(`Most expensive Borrow  : ${f8(top.rate)} (${apr(top.rate)}% APR). ${f4(top.amount)} ${this.ex.symbol}`)
-        log(`Best Borrow            : ${f8(last.rate)} (${apr(last.rate)}% APR). ${f4(last.amount)} ${this.ex.symbol}`)
-        log(`Weighted Avg Borrow    : ${f8(avgRate)} (${apr(avgRate)}% APR). ${f4(totalBorrowed)} ${this.ex.symbol}`)
-        log(`\nCheapest offered       : ${f8(lowRate)} (${apr(lowRate)}% APR). ${f4(book[0].amount)} available`)
-        log(`Want <= than           : ${f8(seeking)} (${apr(seeking)}% APR).`)
+        log(`\n${new Date()}`)
+        log(`${this.eventCount} events since last update`)
+        log(`${borrows.length} active borrows. Next expiry in ${timeRemaining}...`)
+        log(`Worst : ${apr(top.rate)}% APR (${f8(top.rate)}). ${f4(top.amount)} ${this.symbol} used`)
+        log(`Best  : ${apr(last.rate)}% APR (${f8(last.rate)}). ${f4(last.amount)} ${this.symbol} used`)
+        log(`Avg   : ${apr(avgRate)}% APR (${f8(avgRate)}). ${f4(totalBorrowed)} ${this.symbol} total used`)
 
-        if (book[0].rate > seeking) {
-            log(`                       : Too expensive for now`)
-            return
-        }
+        log('\nOffers...')
+        log(`Best  : ${apr(lowRate)}% APR (${f8(lowRate)}). ${f4(book[0].amount)} available`)
+        log(`Need  : ${apr(seeking)}% APR (${f8(seeking)}).\n`)
 
-        // try and replace as much as we can
-        while (i > 0) {
-            const subset = borrows.slice(0, i)
-            const cost = this.replacementCost(subset)
-
-            const cheaperBook = this.orderBookCheaperThan(book, cost.bestRate)
-            const available = cheaperBook.reduce((total, el) => total + el.amount, 0)
-
-            log(`Attempt to replace top ${i} of ${borrows.length} borrows...`)
-            log(
-                `>> Found ${f2(available)} available cheaper than ${f8(cost.bestRate)} (${apr(cost.bestRate)}% APR). Need ${f2(
-                    cost.totalBorrowed
-                )}`
-            )
-
-            if (cost.totalBorrowed >= this.minBorrowSize) {
-                if (available > cost.totalBorrowed) {
-                    // Allocate a bit extra for the cost of borrowing the funds for an hour
-                    const extraForFunding = (cost.totalBorrowed * top.rate) / 24
-
-                    // borrow funds to cover the stuff we are replacing
-                    await this.borrowFunds(book, cost.totalBorrowed + extraForFunding)
-
-                    // return borrowing we can replace with cheaper
-                    await this.returnBorrowing(subset)
-
-                    // stop looking
-                    this.ticksSinceChange = 0
-                    return
-                }
-            } else {
-                // too small?
-                log(`- Borrowing ${cost.totalBorrowed} is below min order size of ${this.minBorrowSize}`)
-            }
-
-            // try a small subset of the list
-            i -= 1
-        }
-
-        log(`== Couldn't find matching offers for now`)
+        this.eventCount = 0
     }
 
     /**
-     * Called every N milliseconds
-     * Will find what you have borrowed now and see if any of it can be replaced with something cheaper
+     * Log out some basic info to show progress
      */
-    async onTimer() {
-        try {
-            // log the time
-            const now = new Date()
-            log(`\nUpdating at ${now.toString()}`)
+    logBorrowStateLite() {
+        const nextExpiryTime = this.nextExpiry(this.borrows)
+        const timeRemaining = this.timeRemainingStr(nextExpiryTime)
+        const lowRate = this.offers[0].rate
+        const top = this.borrows[0]
 
-            // Clear any orders that have not happened
-            await this.ex.cancelAllFundingOffers()
-
-            // Find the used and unused borrowings...
-            const unused = await this.ex.getUnusedBorrows()
-            const borrows = await this.ex.getCurrentInUseBorrows()
-
-            // Sun them up
-            const totalUnused = unused.reduce((sum, b) => sum + b.amount, 0)
-            const totalBorrowed = borrows.reduce((sum, b) => sum + b.amount, 0)
-            log(`Taken Using : ${f2(totalBorrowed)}\nTaken Unused: ${f2(totalUnused)}`)
-
-            // Has anything changed?
-            if (this.prevTotalBorrowed != totalBorrowed) {
-                if (this.ticksSinceChange > 0) {
-                    log(`Borrowing changed. Now: ${f2(totalBorrowed)}. Was ${f2(this.prevTotalBorrowed)}`)
-                    log(`Been ${this.ticksSinceChange} ticks since we changed anything, so exchange changed funding mix.`)
-                    log(`Return unused borrowing...`)
-                    await this.returnBorrowing(unused)
-                }
-
-                // reset the change tracker
-                this.prevTotalBorrowed = totalBorrowed
-                this.ticksSinceChange = 0
-            }
-
-            // pick a long time (say 2 hours) and if nothing changes in that long, anything unused must not be needed any more
-            const longTime = 1000 * 60 * 60 * 2
-            if (totalUnused > 0 && this.ticksSinceChange * this.interval > longTime) {
-                log('Unused borrows have been left unallocated for a long time')
-                log('Unlikely they are needed. Returning them...')
-                await this.returnBorrowing(unused)
-            }
-
-            // Assume no changes will be made this this stage
-            this.ticksSinceChange += 1
-
-            // If we have no used borrowing, stop
-            if (borrows.length === 0) {
-                log('no borrowing - waiting...')
-                return
-            }
-
-            // get the order book
-            const book = await this.ex.getFundingAvailableToBorrow()
-
-            // see if we can replace anything
-            await this.replaceBorrowingIfCheaper(borrows, book)
-            log('Updated complete')
-        } catch (err) {
-            log('Error in onTimer...')
-            log(err.message)
-            console.log(err)
+        log(`${new Date()}`)
+        log(`${this.eventCount} events since last update`)
+        log(`${this.borrows.length} active borrows. Next expiry in ${timeRemaining}...`)
+        if (this.borrows.length > 0) {
+            log(`Worst Borrow : ${apr(top.rate)}% APR (${f8(top.rate)}). ${f4(top.amount)}`)
         }
+        log(`Best Offer   : ${apr(lowRate)}% APR (${f8(lowRate)}). ${f4(this.offers[0].amount)} available`)
+
+        this.eventCount = 0
     }
 }
 
