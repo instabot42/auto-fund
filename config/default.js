@@ -12,6 +12,9 @@ module.exports = {
 
         // The symbol that borrowing will be monitor on
         symbol: 'fUSD',
+
+        // Make a sound (via ascii bell character) when attempting to borrow funds
+        soundOnChange: true,
     },
 
     // How often should an update be logged to the console

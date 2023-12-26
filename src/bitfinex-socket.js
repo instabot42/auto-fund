@@ -1,6 +1,4 @@
 const WebSocket = require('ws')
-const axios = require('axios')
-const crypto = require('node:crypto')
 const config = require('config')
 const EventEmitter = require('events')
 const logger = require('./log')
@@ -317,75 +315,6 @@ class BaseSocket extends EventEmitter {
      * Subscribe to any required feeds
      */
     subscribeToFeeds() {}
-
-    /**
-     * Make rest calls
-     * @param {*} m
-     * @param {*} path
-     * @param {*} params
-     * @returns
-     */
-    async httpCall(m, path, params = {}) {
-        // Check we have some keys
-        if (this.key === '' || this.secret === '') {
-            log('Set up API keys in config (config/local.js) to call authenticated endpoints')
-            throw new Error('No API Keys Provided')
-        }
-
-        const method = m.toUpperCase()
-        const endpoint = 'https://api.bitfinex.com'
-
-        const uri = method === 'POST' ? path : this.buildURI(path, params)
-        const body = method === 'POST' ? JSON.stringify(params) : ''
-
-        // Sign the request
-        const nonce = `${this.nextMsgId()}`
-        const messageToSign = `/api${path}${nonce}${body}`
-        const signature = this.signMessage(messageToSign)
-
-        // debug(`${method} ${path} - ${nonce}`)
-
-        // put the required data in the headers
-        const headers = {
-            'Content-Type': 'application/json',
-            'bfx-nonce': nonce,
-            'bfx-apikey': this.key,
-            'bfx-signature': signature,
-        }
-
-        // Build the request
-        const request = {
-            method,
-            url: `${endpoint}${uri}`,
-            headers,
-            data: body,
-        }
-
-        try {
-            log(`## ${m} ${path}`)
-            const response = await axios(request)
-            return response.data
-        } catch (error) {
-            if (error.response) {
-                log(`Bitfinex REST API error response. Status Code: ${error.response.status}`)
-                log(error.response.data)
-            } else if (error.request) {
-                log('Request Error making REST API request to Bitfinex (exchange down?)')
-            } else {
-                log('Error making REST API request to Bitfinex')
-            }
-
-            throw new Error('Bitfinex REST API Error. Call rejected')
-        }
-    }
-
-    /**
-     * Helper to sign the authentication message
-     * @returns {string}
-     */
-    signMessage(message) {
-        return crypto.createHmac('sha384', this.secret).update(message).digest('hex')
-    }
 }
 
 module.exports = BaseSocket

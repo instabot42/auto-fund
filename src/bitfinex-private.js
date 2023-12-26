@@ -1,5 +1,6 @@
 const crypto = require('node:crypto')
 const config = require('config')
+const axios = require('axios')
 const BaseSocket = require('./bitfinex-socket')
 const logger = require('./log')
 const log = logger('bitfinex-auth')
@@ -16,6 +17,12 @@ class PrivateSocket extends BaseSocket {
         this.loggedIn = false
 
         this.orderBookChannelId = -1
+
+        // setting to 'go bing' when we want to borrow. Will happen, even in dry run, so you can notice
+        this.soundOnChange = config.get('bitfinex.soundOnChange')
+        if (this.soundOnChange) {
+            log('Will go bong when trying to borrow... \u0007')
+        }
     }
 
     /**
@@ -25,6 +32,11 @@ class PrivateSocket extends BaseSocket {
      * @returns
      */
     borrowFunds(amount, rate) {
+        // Play a noise
+        if (this.soundOnChange) {
+            log('\u0007. Bong. Wanting to change something')
+        }
+
         if (this.dryRun) {
             log('DRYRUN: not requesting new borrowing')
             return
@@ -62,6 +74,7 @@ class PrivateSocket extends BaseSocket {
             try {
                 // https://docs.bitfinex.com/reference/rest-auth-funding-close
                 // /v2/auth/w/funding/close
+                log(`Request to return borrowing id ${id}`)
                 await this.httpCall('post', '/v2/auth/w/funding/close', { id })
             } catch (err) {
                 // Just eat the error and log it
@@ -352,16 +365,17 @@ class PrivateSocket extends BaseSocket {
      */
     rawToTrade(t) {
         return {
-            id: t[0],
+            id: t[0] ?? null,
             currency: t[1],
             createdAt: t[2],
-            offerId: t[3],
+            offerId: t[3] ?? null,
             amount: t[4],
             rate: t[5],
             rateFixed: t[5].toFixed(8),
             ratePercent: (t[5] * 365 * 100).toFixed(4),
             period: t[6],
             maker: t[7] === 1,
+            desc: t[7] === 1 ? 'Maker' : 'Taker'
         }
     }
 
@@ -436,6 +450,75 @@ class PrivateSocket extends BaseSocket {
             rateFixed: rate.toFixed(8),
             ratePercent: (rate * 365 * 100).toFixed(4),
         }
+    }
+
+    /**
+     * Make rest calls
+     * @param {*} m
+     * @param {*} path
+     * @param {*} params
+     * @returns
+     */
+    async httpCall(m, path, params = {}) {
+        // Check we have some keys
+        if (this.key === '' || this.secret === '') {
+            log('Set up API keys in config (config/local.js) to call authenticated endpoints')
+            throw new Error('No API Keys Provided')
+        }
+
+        const method = m.toUpperCase()
+        const endpoint = 'https://api.bitfinex.com'
+
+        const uri = method === 'POST' ? path : this.buildURI(path, params)
+        const body = method === 'POST' ? JSON.stringify(params) : ''
+
+        // Sign the request
+        const nonce = `${this.nextMsgId()}`
+        const messageToSign = `/api${path}${nonce}${body}`
+        const signature = this.signMessage(messageToSign)
+
+        // debug(`${method} ${path} - ${nonce}`)
+
+        // put the required data in the headers
+        const headers = {
+            'Content-Type': 'application/json',
+            'bfx-nonce': nonce,
+            'bfx-apikey': this.key,
+            'bfx-signature': signature,
+        }
+
+        // Build the request
+        const request = {
+            method,
+            url: `${endpoint}${uri}`,
+            headers,
+            data: body,
+        }
+
+        try {
+            log(`## ${m} ${path}`)
+            const response = await axios(request)
+            return response.data
+        } catch (error) {
+            if (error.response) {
+                log(`Bitfinex REST API error response. Status Code: ${error.response.status}`)
+                log(error.response.data)
+            } else if (error.request) {
+                log('Request Error making REST API request to Bitfinex (exchange down?)')
+            } else {
+                log('Error making REST API request to Bitfinex')
+            }
+
+            throw new Error('Bitfinex REST API Error. Call rejected')
+        }
+    }
+
+    /**
+     * Helper to sign the authentication message
+     * @returns {string}
+     */
+    signMessage(message) {
+        return crypto.createHmac('sha384', this.secret).update(message).digest('hex')
     }
 }
 

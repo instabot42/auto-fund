@@ -27,6 +27,7 @@ class App {
         this.socket.on('cancel-order', (order) => this.onCancelOrder(order))
 
         this.socket.on('execute-trade', (trade) => this.onExecuteTrade(trade))
+        this.socket.on('update-trade', (trade) => this.onUpdateTrade(trade))
 
         // some settings
         this.loggingInterval = config.get('interval')
@@ -41,7 +42,9 @@ class App {
 
         // When switching out borrow, track the changes...
         this.pending = null
-        this.overBid = 0
+
+        this.netUsing = 0
+        this.netUnused = 0
 
         this.pauseUntil = Date.now() + 5000
         this.eventCount = 0
@@ -52,13 +55,13 @@ class App {
      */
     start() {
         log('Starting...')
-        this.pauseUntil = Date.now() + 5000
+        this.pauseUntil = Date.now() + 10000
         this.socket.open()
 
         if (this.loggingInterval) {
             log(`Will log state every ${this.loggingInterval}ms`)
             setInterval(() => this.onTimer(), this.loggingInterval)
-            setTimeout(() => this.onTimer(), 10000)
+            setTimeout(() => this.onTimer(), 8000)
         } else {
             log('State logging disabled. set `interval` in the config to enable')
         }
@@ -100,7 +103,17 @@ class App {
         this.sortBorrows()
         this.eventCount += 1
 
-        log(`New Borrow   : ${borrow.ratePercent}% APR (${borrow.rateFixed}). ${borrow.amount.toFixed(4)} type: ${borrow.type}`)
+        if (borrow.type === 'using') {
+            this.netUsing += borrow.amount
+        } else {
+            this.netUnused += borrow.amount
+        }
+
+        log(
+            `New Borrow   : ${borrow.ratePercent}% APR (${borrow.rateFixed}). ${borrow.amount.toFixed(4)} type: ${borrow.type}, id: ${
+                borrow.id
+            }`
+        )
     }
 
     /**
@@ -110,7 +123,18 @@ class App {
     onCancelBorrow(borrow) {
         this.borrows = this.borrows.filter((b) => b.id !== borrow.id)
         this.eventCount += 1
-        log(`Return Borrow: ${borrow.ratePercent}% APR (${borrow.rateFixed}). ${borrow.amount.toFixed(4)} type: ${borrow.type}`)
+
+        if (borrow.type === 'using') {
+            this.netUsing -= borrow.amount
+        } else {
+            this.netUnused -= borrow.amount
+        }
+
+        log(
+            `Return Borrow: ${borrow.ratePercent}% APR (${borrow.rateFixed}). ${borrow.amount.toFixed(4)} type: ${borrow.type}, id: ${
+                borrow.id
+            }`
+        )
     }
 
     /**
@@ -126,7 +150,7 @@ class App {
             this.pending.orderIds = this.pending.orderIds.filter((id) => id !== order.id)
             this.pending.orderIds.push(order.id)
         }
-        // log(`New/Updated Order Detected, ${order.amount} at ${order.ratePercent}% id:${order.id}`)
+        log(`New/Updated Order Detected, ${order.amountRemaining} of ${order.amount} at ${order.ratePercent}% id:${order.id}`)
     }
 
     /**
@@ -136,7 +160,7 @@ class App {
     onCancelOrder(order) {
         this.orders = this.orders.filter((o) => o.id !== order.id)
         this.eventCount += 1
-        // log(`Cancelled/Filled Order Detected, ${order.amount} at ${order.ratePercent}% id:${order.id}`)
+        log(`Cancelled/Filled Order Detected, ${order.amountRemaining} of ${order.amount} at ${order.ratePercent}% id:${order.id}`)
     }
 
     /**
@@ -144,15 +168,20 @@ class App {
      * @param {*} trade
      */
     onExecuteTrade(trade) {
-        log(
-            `Trade Executed : ${trade.ratePercent}% APR (${trade.rate}). ${trade.amount.toFixed(4)} for ${trade.period} days. ${
-                trade.maker ? 'Maker' : 'Taker'
-            }`
-        )
+        log(`Trade Executed : ${trade.ratePercent}% APR (${trade.rate}). ${trade.amount.toFixed(4)} for ${trade.period} days.`)
+        log(`Trade Executed : id: ${trade.id}, offerId: ${trade.offerId}. ${trade.desc}`)
         if (this.pending) {
             this.pending.filledCount += 1
             this.pending.filledAmount += Math.abs(trade.amount)
         }
+    }
+
+    /**
+     * Called when a trade is executed
+     * @param {*} trade
+     */
+    onUpdateTrade(trade) {
+        log(`Trade Updated : id: ${trade.id}, offerId: ${trade.offerId}. ${trade.desc}`)
     }
 
     /**
@@ -273,8 +302,9 @@ class App {
         }
 
         // Ask to borrow funds
-        log('>>>>>> BEGIN>>')
+        log(`>>>>>> BEGIN >>`)
         this.borrowFunds(amount, rate)
+        this.totalBorrowed += amount
 
         // Wait a bit a see if we have any fills
         let tries = 0
@@ -294,9 +324,14 @@ class App {
             await this.borrowReturn(toReturn)
         }
 
+        // wait for everything to settle.
+        await this.sleep(5000)
+
         // Avoid doing anything for a few seconds and release pending
-        log('>>>>>> END<<')
-        this.pauseUntil = Date.now() + 2000
+        this.logBorrowStateLite()
+        log(`>>>>>> END <<\n`)
+
+        this.pauseUntil = Date.now() + 1000 * 60
         this.pending = null
     }
 
@@ -308,14 +343,22 @@ class App {
     borrowsToReturn(toReplace) {
         // Nothing filled, nothing to return
         if (!this.pending || this.pending.filledCount === 0) {
+            log('no fills seen. returning nothing')
             return []
+        }
+
+        if (toReplace.length === 1) {
+            // if we are only replacing a single item,
+            // and we have had a fill, return it
+            log(`Filled ${this.pending.filledAmount}, returning ${toReplace[0].amount}`)
+            return toReplace
         }
 
         // Something filled. find what we can return and what we need to keep
         let ret = []
-        let amt = this.pending.filledAmount + this.overBid
+        let amt = this.pending.filledAmount
         toReplace.forEach((r) => {
-            if (amt >= r.amount) {
+            if (amt > 0) {
                 amt -= r.amount
                 ret.push(r)
             }
@@ -323,15 +366,7 @@ class App {
 
         // How much was there vs what we are returning
         const amtReturned = ret.reduce((sum, r) => sum + r.amount, 0)
-        const diffFromReturned = this.pending.filledAmount - amtReturned
-
-        // Keep track of any differences between what we borrow and what we return
-        // This is used above as an error correction to ensure we tend towards replacing the same as we borrow
-        // this is to prevent small fills on a big borrow that can't be returned from building up over time
-        this.overBid += diffFromReturned
-        if (this.overBid <= 0) {
-            this.overBid = 0
-        }
+        log(`Filled ${this.pending.filledAmount}, returning ${amtReturned}`)
 
         return ret
     }
@@ -355,6 +390,7 @@ class App {
         if (items.length === 0) {
             return
         }
+
         const ids = items.map((b) => b.id)
         await this.socket.borrowReturn(ids)
     }
@@ -504,6 +540,7 @@ class App {
             log(`Worst Borrow : ${apr(top.rate)}% APR (${f8(top.rate)}). ${f4(top.amount)}`)
         }
         log(`Best Offer   : ${apr(lowRate)}% APR (${f8(lowRate)}). ${f4(this.offers[0].amount)} available`)
+        log(`Net          : Using: ${f2(this.netUsing)}, Unused: ${f2(this.netUnused)}`)
 
         this.eventCount = 0
     }

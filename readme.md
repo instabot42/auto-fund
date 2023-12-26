@@ -46,6 +46,9 @@ When you want to run the bot for real, edit `local.js` and change `dryRun` to fa
 
 ### Other Settings
 
+*bitfinex.soundOnChange* A flag (true or false). If true, a 'Bing' will sound, via the ascii bell character, whenever the bot wants to borrow some funds. This
+will happen in dry run mode too, so you can use the bot as a tool to just notify you when cheaper funding is available in the order book. defaults to true.
+
 *interval* Determines how often the bot will log out a summary. The number is in milliseconds.
 
 *minImprovement* How much better should the funding rate be before the bot will bother trying to make a change. The bot will query your most expensive in-use funding rate and subtract this value from it, to get a target rate. It will then look for available funding at a rate lower than this target value.
