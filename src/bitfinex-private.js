@@ -314,10 +314,10 @@ class PrivateSocket extends BaseSocket {
             case 'hb':
                 break
 
-            case 'ps':  // position snapshot
-            case 'pn':  // position new
-            case 'pu':  // position update
-            case 'os':  // order snapshot
+            case 'ps': // position snapshot
+            case 'pn': // position new
+            case 'pu': // position update
+            case 'os': // order snapshot
                 log(`To do: ${type}`)
                 break
 
@@ -375,7 +375,7 @@ class PrivateSocket extends BaseSocket {
             ratePercent: (t[5] * 365 * 100).toFixed(4),
             period: t[6],
             maker: t[7] === 1,
-            desc: t[7] === 1 ? 'Maker' : 'Taker'
+            desc: t[7] === 1 ? 'Maker' : 'Taker',
         }
     }
 
@@ -409,6 +409,7 @@ class PrivateSocket extends BaseSocket {
      * @returns
      */
     rawToBorrow(f, type) {
+        const rate = f[19] !== null ? f[19] : f[11]
         return {
             id: f[0],
             symbol: f[1],
@@ -419,9 +420,9 @@ class PrivateSocket extends BaseSocket {
             expiresAt: f[13] + f[12] * 1000 * 60 * 60 * 24,
             amount: f[5],
             status: f[7],
-            rate: f[11],
-            rateFixed: f[11].toFixed(8),
-            ratePercent: (f[11] * 365 * 100).toFixed(4),
+            rate,
+            rateFixed: rate.toFixed(8),
+            ratePercent: (rate * 365 * 100).toFixed(4),
             period: f[12],
             pair: f[21] ? f[21] : 'none',
         }
