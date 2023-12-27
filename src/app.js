@@ -188,7 +188,7 @@ class App {
      * Called from time to time to log out the state of things
      */
     onTimer() {
-        this.logBorrowStateLite()
+        this.logBorrowState()
     }
 
     /**
@@ -227,22 +227,26 @@ class App {
             // Start with all of them, and gradually work back until we are testing against only the most expensive borrow
             const subset = borrows.slice(0, i)
 
-            // Figure out the replace cost and how much we'd need to borrow here
+            // Calculate the amount in this subset, and the best rate we are borrowing at
+            // Any replacement has to be able to cover as much qty, at a better rate
             const cost = this.replacementCost(subset)
-            const borrowAmount = cost.totalBorrowed
+
+            // Find the section of the order book that offers a better rate (better by the min improvement)
+            // and figure out how much liquidity is there
             const cheaperBook = this.orderBookCheaperThan(book, cost.bestRate)
             const available = cheaperBook.reduce((total, el) => total + el.amount, 0)
 
             // If there is enough available in the order book, and it is > min order size, have a go...
+            const borrowAmount = cost.totalBorrowed
             if (borrowAmount >= this.minBorrowSize && available > borrowAmount) {
-                // Find the optimal rate
+                // Find the optimal rate to try and borrow at
                 const targetRate = this.findTargetRateToBorrow(cheaperBook, borrowAmount)
 
                 // report the state of things
                 this.logBorrowState()
-                log('Match Found...')
+                log('\nMatch Found...')
                 log(`>> Can replace top ${i} of ${borrows.length} borrows...`)
-                log(`>> Needed ${f2(borrowAmount)}. Found ${f2(available)}`)
+                log(`>> Needed ${f2(borrowAmount)}. Found ${f2(available)} available`)
                 log(`>> Replaces existing at ${apr(cost.bestRate)}% APR (${f8(cost.bestRate)}) or worse`)
                 log(`>> With new at          ${apr(targetRate)}% APR (${f8(targetRate)}) or better\n`)
 
@@ -328,7 +332,7 @@ class App {
         await this.sleep(5000)
 
         // Avoid doing anything for a few seconds and release pending
-        this.logBorrowStateLite()
+        this.logBorrowState()
         log(`>>>>>> END <<\n`)
 
         this.pauseUntil = Date.now() + 1000 * 60
@@ -337,7 +341,7 @@ class App {
 
     /**
      * Find the list of borrows to return
-     * @param {*} toReplace
+     * @param {*} toReplace - is sorted by most expensive first
      * @returns
      */
     borrowsToReturn(toReplace) {
@@ -354,21 +358,54 @@ class App {
             return toReplace
         }
 
-        // Something filled. find what we can return and what we need to keep
-        let ret = []
-        let amt = this.pending.filledAmount
-        toReplace.forEach((r) => {
-            if (amt > 0) {
-                amt -= r.amount
-                ret.push(r)
+        // Something filled and we have several borrows to choose from
+        // try and find an optimal combination of items to return, so we return as close
+        // to the amount filled. Default to returning everything
+        let toReturn = toReplace.slice()
+        let smallestDiff = toReplace.reduce((a, el) => a + el.amount, 0)
+        const tolerance = smallestDiff / 1000000
+
+        // Helper function to recurse though the list of possible items
+        function findBestComboOfReturns(items, target, possible = []) {
+            // Sum this possible match
+            const partialSum = possible.reduce((s, b) => s + b.amount, 0)
+            if (partialSum >= target) {
+                // this would return at least enough (maybe a little over)
+                return partialSum
             }
-        })
+
+            for (let i = 0; i < items.length; i++) {
+                const remaining = items.slice(i + 1)
+                const next = possible.concat([items[i]])
+                const result = findBestComboOfReturns(remaining, target, next)
+
+                if (result) {
+                    // This is a possible suitable combo, so see how far off we are
+                    const diff = result - target
+
+                    // if this match it better, remember it
+                    if (diff < smallestDiff) {
+                        smallestDiff = diff
+                        toReturn = next.slice()
+                    }
+                }
+
+                // if we are close enough, we can kill the recusion
+                if (smallestDiff < tolerance) {
+                    return false
+                }
+            }
+
+            return false
+        }
+
+        // recursive effort to find the best combination to return
+        findBestComboOfReturns(toReplace, this.pending.filledAmount)
 
         // How much was there vs what we are returning
-        const amtReturned = ret.reduce((sum, r) => sum + r.amount, 0)
-        log(`Filled ${this.pending.filledAmount}, returning ${amtReturned}`)
-
-        return ret
+        const amtReturned = toReturn.reduce((sum, r) => sum + r.amount, 0)
+        log(`Filled ${this.pending.filledAmount}, returning ${amtReturned} over ${toReturn.length} items`)
+        return toReturn
     }
 
     /**
@@ -503,42 +540,15 @@ class App {
 
         const top = borrows[0]
         const last = borrows[borrows.length - 1]
-
-        const seeking = borrows[0].rate - this.minImprovement
-
         const lowRate = book[0].rate
         const scaledRate = borrows.reduce((sum, b) => sum + b.rate * b.amount, 0)
         const totalBorrowed = borrows.reduce((sum, b) => sum + b.amount, 0)
         const avgRate = scaledRate / totalBorrowed
         log(`\n${new Date()}`)
-        log(`${this.eventCount} events since last update`)
         log(`${borrows.length} active borrows. Next expiry in ${timeRemaining}...`)
         log(`Worst : ${apr(top.rate)}% APR (${f8(top.rate)}). ${f4(top.amount)} ${this.symbol} used`)
         log(`Best  : ${apr(last.rate)}% APR (${f8(last.rate)}). ${f4(last.amount)} ${this.symbol} used`)
         log(`Avg   : ${apr(avgRate)}% APR (${f8(avgRate)}). ${f4(totalBorrowed)} ${this.symbol} total used`)
-
-        log('\nOffers...')
-        log(`Best  : ${apr(lowRate)}% APR (${f8(lowRate)}). ${f4(book[0].amount)} available`)
-        log(`Need  : ${apr(seeking)}% APR (${f8(seeking)}).\n`)
-
-        this.eventCount = 0
-    }
-
-    /**
-     * Log out some basic info to show progress
-     */
-    logBorrowStateLite() {
-        const nextExpiryTime = this.nextExpiry(this.borrows)
-        const timeRemaining = this.timeRemainingStr(nextExpiryTime)
-        const lowRate = this.offers[0].rate
-        const top = this.borrows[0]
-
-        log(`${new Date()}`)
-        log(`${this.eventCount} events since last update`)
-        log(`${this.borrows.length} active borrows. Next expiry in ${timeRemaining}...`)
-        if (this.borrows.length > 0) {
-            log(`Worst Borrow : ${apr(top.rate)}% APR (${f8(top.rate)}). ${f4(top.amount)}`)
-        }
         log(`Best Offer   : ${apr(lowRate)}% APR (${f8(lowRate)}). ${f4(this.offers[0].amount)} available`)
         log(`Net          : Using: ${f2(this.netUsing)}, Unused: ${f2(this.netUnused)}`)
 

@@ -24,7 +24,7 @@ module.exports = {
     // This will be used with the daily interest rate.
     // For example 0.018% a day (6.57% a year) is expressed at 0.00018 in the API
     // though shown as a percentage in the Bitfinex UI at 0.018
-    minImprovement: 0.00000001,
+    minImprovement: 0.0000005,
 
     // The min amount to borrow in a single transaction (to avoid fragmenting your borrowing)
     // this is in units of the borrowing currency (eg fUSD in this config above)
