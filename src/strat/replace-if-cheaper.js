@@ -1,6 +1,5 @@
 const App = require('./app')
-const logger = require('../util/log')
-const log = logger('app-replace')
+const log = require('../util/log')('app-replace')
 
 class ReplaceIfCheaperApp extends App {
     constructor(socket) {

@@ -3,8 +3,7 @@ const axios = require('axios')
 const config = require('../util/config')
 const BaseSocket = require('./bitfinex-socket')
 const Lock = require('../util/lock')
-const logger = require('../util/log')
-const log = logger('bitfinex-auth')
+const log = require('../util/log')('bitfinex-auth')
 
 // https://docs.bitfinex.com/docs/ws-general
 

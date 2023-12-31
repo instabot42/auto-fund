@@ -1,6 +1,5 @@
 const config = require('../util/config')
-const logger = require('../util/log')
-const log = logger('app')
+const log = require('../util/log')('app')
 
 class App {
     /**
@@ -201,7 +200,7 @@ class App {
             return
         }
 
-        log(`Borrow ${amount}. Limit Rate ${this.apr(rate)}% (${this.f8(rate)}) ${this.bell}`)
+        log(`Borrow ${this.f4(amount)}. Limit Rate ${this.apr(rate)}% (${this.f8(rate)}) ${this.bell}`)
         this.socket.borrowFunds(amount, rate)
     }
 

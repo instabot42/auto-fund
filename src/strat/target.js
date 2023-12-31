@@ -1,8 +1,7 @@
 const App = require('./app')
 const config = require('../util/config')
 const Lock = require('../util/lock')
-const logger = require('../util/log')
-const log = logger('app-replace')
+const log = require('../util/log')('app-target')
 
 class TargetApp extends App {
     constructor(socket) {
@@ -121,11 +120,11 @@ class TargetApp extends App {
             for (const ratePercent of this.targetRates) {
                 const rate = ratePercent / 365 / 100
                 this.tooExpensive = this.borrows.filter((b) => b.rate > rate)
-                log(`Found ${this.tooExpensive.length} borrows > ${this.apr(rate)}% (${this.f8(rate)})`)
+                const amountToReplace = this.tooExpensive.reduce((s, b) => s + b.amount, 0)
+                log(`Found ${this.tooExpensive.length} borrows > ${this.apr(rate)}% (${this.f8(rate)}) for ${this.f2(amountToReplace)} ${this.symbol}`)
 
                 if (this.tooExpensive.length > 0) {
                     // Find out how much is too expensive
-                    const amountToReplace = this.tooExpensive.reduce((s, b) => s + b.amount, 0)
                     const toBorrow = amountToReplace - this.pendingReturn
                     log(`>> Want to replace: ${this.f4(amountToReplace)}`)
                     log(`>> Unspent fills:   ${this.f4(this.pendingReturn)}`)
