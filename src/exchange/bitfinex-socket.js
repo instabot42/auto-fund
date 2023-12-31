@@ -1,8 +1,7 @@
 const WebSocket = require('ws')
-const config = require('config')
 const EventEmitter = require('events')
-const logger = require('./log')
-const log = logger('bitfinex')
+const config = require('../util/config')
+const log = require('../util/log')('bitfinex')
 
 class BaseSocket extends EventEmitter {
     constructor() {

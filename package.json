@@ -11,8 +11,7 @@
   "license": "MIT",
   "dependencies": {
     "axios": "^1.6.2",
-    "chalk": "^4.1.2",
-    "config": "^3.3.9",
+    "chalk": "^4",
     "ws": "^8.15.1"
   }
 }

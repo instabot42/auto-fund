@@ -1,8 +1,9 @@
 const crypto = require('node:crypto')
-const config = require('config')
 const axios = require('axios')
+const config = require('../util/config')
 const BaseSocket = require('./bitfinex-socket')
-const logger = require('./log')
+const Lock = require('../util/lock')
+const logger = require('../util/log')
 const log = logger('bitfinex-auth')
 
 // https://docs.bitfinex.com/docs/ws-general
@@ -18,11 +19,8 @@ class PrivateSocket extends BaseSocket {
 
         this.orderBookChannelId = -1
 
-        // setting to 'go bing' when we want to borrow. Will happen, even in dry run, so you can notice
-        this.soundOnChange = config.get('bitfinex.soundOnChange')
-        if (this.soundOnChange) {
-            log('Will go bong when trying to borrow... \u0007')
-        }
+        // HTTP Locking
+        this.apiLock = new Lock()
     }
 
     /**
@@ -32,11 +30,6 @@ class PrivateSocket extends BaseSocket {
      * @returns
      */
     borrowFunds(amount, rate) {
-        // Play a noise
-        if (this.soundOnChange) {
-            log('\u0007. Bong. Wanting to change something')
-        }
-
         if (this.dryRun) {
             log('DRYRUN: not requesting new borrowing')
             return
@@ -72,10 +65,12 @@ class PrivateSocket extends BaseSocket {
 
         for (const id of ids) {
             try {
-                // https://docs.bitfinex.com/reference/rest-auth-funding-close
-                // /v2/auth/w/funding/close
-                log(`Request to return borrowing id ${id}`)
-                await this.httpCall('post', '/v2/auth/w/funding/close', { id })
+                await this.apiLock.runLocked(async () => {
+                    // https://docs.bitfinex.com/reference/rest-auth-funding-close
+                    // /v2/auth/w/funding/close
+                    log(`Request to return borrowing id ${id}`)
+                    await this.httpCall('post', '/v2/auth/w/funding/close', { id })
+                })
             } catch (err) {
                 // Just eat the error and log it
                 log(`Error trying to return borrowing ${id}`)
@@ -91,6 +86,10 @@ class PrivateSocket extends BaseSocket {
     cancelOffers(ids) {
         if (this.dryRun) {
             log('DRYRUN: not cancelling offers')
+            return
+        }
+
+        if (ids.length === 0) {
             return
         }
 
@@ -290,6 +289,9 @@ class PrivateSocket extends BaseSocket {
                 break
 
             case 'fon':
+                this.broadcastOrder(this.rawToFundingOrder(data[2]), 'new')
+                break
+
             case 'fou':
                 this.broadcastOrder(this.rawToFundingOrder(data[2]), 'update')
                 break
@@ -385,6 +387,7 @@ class PrivateSocket extends BaseSocket {
      * @returns
      */
     rawToFundingOrder(o) {
+        const filled = o[5] - o[4]
         return {
             id: o[0],
             symbol: o[1],
@@ -392,6 +395,7 @@ class PrivateSocket extends BaseSocket {
             updatedAt: o[3],
             amountRemaining: o[4],
             amount: o[5],
+            filled,
             type: o[6].toLowerCase(),
             flags: o[9],
             status: o[10].toLowerCase(),
