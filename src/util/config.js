@@ -116,7 +116,7 @@ class Config {
             }
         }
 
-        return false
+        return undefined
     }
 
     // Helper functions shared accross object members
