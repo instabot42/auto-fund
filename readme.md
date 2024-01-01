@@ -60,7 +60,8 @@ will happen in dry run mode too, so you can use the bot as a tool to just notify
 Replace looks out for cheap offers on the order book and trys to grab them instantly and use them to replace more expensive borrows.
 Target finds existing borrows that are over some target rate, places an order to replace them all at the target rate, and waits for it to fill. See the 'rates' list below.
 
-*target.rates* is an array of rates used by the 'target' strategy only (eg, 0.00024). These are the daily interest rates, so 0.00024 represents 0.024% a day, or around 8.75% a year.
+*target.rates* is an array of rates used by the 'target' strategy only.
+These are the yearly interest rates, so 8.75 represents 8.75% a year, (0.024% a day, or around 0.00024 as used in the API).
 The values should be provided in order from highest rate to lowest rate. The bot will first try and replace anything more expensive than the first rate. Only if there is nothing more expensive will it move on to the second rate, the third and so on. This way, it is possible to fairly quickly move away from very high FRR rates to something resonable, then spend time trying to ease this borrowing lower and lower.
 
 
