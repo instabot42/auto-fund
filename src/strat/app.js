@@ -55,6 +55,24 @@ class App {
         this.onStartup()
     }
 
+    /**
+     * Ask to stop the app from running - clean up please...
+     */
+    async stop() {
+        // stop doing things
+        this.pauseUntil = Date.now() + 100000
+
+        // give everything a chance to stop
+        await this.beforeShutdown()
+
+        // close the socket
+        this.socket.close()
+        await this.sleep(1000)
+    }
+
+    /**
+     * Called as the app starts
+     */
     onStartup() {
         if (this.interval) {
             log(`Refresh interval ${this.interval}ms`)
@@ -63,6 +81,13 @@ class App {
         } else {
             log('State logging disabled. set `interval` in the config to enable')
         }
+    }
+
+    /**
+     * Called just before the app is closed. Last chance to clean up
+     */
+    async beforeShutdown() {
+        log(`Stopping App...`)
     }
 
     /**
@@ -143,6 +168,7 @@ class App {
     onCancelOrder(order) {
         this.orders = this.orders.filter((o) => o.id !== order.id)
         this.eventCount += 1
+        log(`Offer id ${order.id} for ${this.f4(Math.abs(order.amount))} has been cancelled.`)
     }
 
     /**

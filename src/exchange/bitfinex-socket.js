@@ -171,14 +171,13 @@ class BaseSocket extends EventEmitter {
      * @param {*} e
      */
     async onClose(e) {
-        log(`socket is closing...`)
+        log(`Socket is closing...`)
 
         // stop the pings
         this.clearTimers()
 
         // clean up the socket
         if (this.ws) {
-            this.ws.terminate()
             this.ws.removeAllListeners()
             this.ws = null
         }
@@ -188,6 +187,8 @@ class BaseSocket extends EventEmitter {
         if (!this.isClosing) {
             log(`socket closed while active - reconnecting...`)
             this.restartConnection()
+        } else {
+            log(`Closed.`)
         }
     }
 

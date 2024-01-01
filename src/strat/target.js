@@ -144,6 +144,14 @@ class TargetApp extends App {
     }
 
     /**
+     * App is closing, so cancel my open funding offers
+     */
+    async beforeShutdown() {
+        super.beforeShutdown()
+        await this.cancelAllOrders()
+    }
+
+    /**
      * Cancels all open orders and waits for them to complete (well, waits a bit anyway)
      */
     async cancelAllOrders() {
@@ -153,7 +161,7 @@ class TargetApp extends App {
         let tries = 0
         while (tries < 10 && this.orders.length > 0) {
             tries += 1
-            await this.sleep(1000)
+            await this.sleep(100)
         }
     }
 }

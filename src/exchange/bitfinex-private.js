@@ -93,7 +93,7 @@ class PrivateSocket extends BaseSocket {
         }
 
         // For each id, send a message to cancel it
-        log(`Cancel ${ids.length} Offers..`)
+        log(`Cancelling ${ids.length} Offers...`)
         ids.forEach((id) => {
             const msg = [0, 'foc', null, { id }]
             this.sendSocketMsg(msg)
@@ -127,8 +127,8 @@ class PrivateSocket extends BaseSocket {
             authPayload,
             event: 'auth',
             filter: [
-                `funding-${this.symbol}`, // Just stuff about the symbol we are working with
-                //'trading',
+                `funding-${this.symbol}`,   // Just stuff about the symbol we are working with
+                // 'trading',               // Not tracking positions or orders yet
             ],
         })
     }
@@ -318,8 +318,9 @@ class PrivateSocket extends BaseSocket {
             case 'ps': // position snapshot
             case 'pn': // position new
             case 'pu': // position update
+                break
+
             case 'os': // order snapshot
-                log(`To do: ${type}`)
                 break
 
             // Unknown
@@ -453,6 +454,34 @@ class PrivateSocket extends BaseSocket {
             amount: Math.abs(amount),
             rateFixed: rate.toFixed(8),
             ratePercent: (rate * 365 * 100).toFixed(4),
+        }
+    }
+
+    /**
+     * Return position data from a stream
+     * @param {*} pos
+     * @returns
+     */
+    rawToPosition(pos) {
+        return {
+            symbol: pos[0],
+            status: pos[1].toLowerCase(),
+            amount: pos[2],
+            basePrice: pos[3],
+            marginFundingCost: pos[4],
+            marginFundingType: pos[5],
+            pnl: pos[6],
+            pnlPercent: pos[7],
+            liquidationPrice: pos[8],
+            leverage: pos[9],
+            flags: pos[10],
+            id: pos[11],
+            createdAt: pos[12],
+            updatedAt: pos[13],
+            type: pos[15],
+            collateral: pos[17],
+            collatoralMin: pos[18],
+            meta: pos[19],
         }
     }
 
