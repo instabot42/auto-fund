@@ -56,23 +56,23 @@ class PrivateSocket extends BaseSocket {
      * Returns the listed borrows (closing the funding borrowed)
      * @param {*} ids
      */
-    async borrowReturn(ids) {
+    async borrowReturn(borrows) {
         if (this.dryRun) {
-            log(`DRYRUN: not returning ${ids.length} loans`)
+            log(`DRYRUN: not returning ${borrows.length} loans`)
             return
         }
 
-        for (const id of ids) {
+        for (const b of borrows) {
             try {
                 await this.apiLock.runLocked(async () => {
                     // https://docs.bitfinex.com/reference/rest-auth-funding-close
                     // /v2/auth/w/funding/close
-                    log(`Request to return borrowing id ${id}`)
-                    await this.httpCall('post', '/v2/auth/w/funding/close', { id })
+                    log(`==Request to return borrowing id ${b.id} for ${b.amount} ${b.status}`)
+                    await this.httpCall('post', '/v2/auth/w/funding/close', { id: b.id })
                 })
             } catch (err) {
                 // Just eat the error and log it
-                log(`Error trying to return borrowing ${id}`)
+                log(`Error trying to return borrowing`, b)
             }
         }
     }
@@ -127,8 +127,9 @@ class PrivateSocket extends BaseSocket {
             authPayload,
             event: 'auth',
             filter: [
-                `funding-${this.symbol}`,   // Just stuff about the symbol we are working with
-                // 'trading',               // Not tracking positions or orders yet
+                `funding-${this.symbol}`, // Just stuff about the symbol we are working with
+                'trading', // positions
+                `wallet-trading-${this.quoteCurrency}`, // balance
             ],
         })
     }
@@ -316,11 +317,26 @@ class PrivateSocket extends BaseSocket {
                 break
 
             case 'ps': // position snapshot
+                data[2].map((p) => this.rawToPosition(p)).forEach((p) => this.broadcastPosition(p, 'update'))
+                break
+
             case 'pn': // position new
             case 'pu': // position update
+                this.broadcastPosition(this.rawToPosition(data[2]), 'update')
+                break
+
+            case 'ws': // Wallet snapshot
+                data[2].map((w) => this.rawToWallet(w)).forEach((w) => this.broadcastWallet(w))
+                break
+
+            case 'wu': // Wallet update
+                this.broadcastWallet(this.rawToWallet(data[2]))
                 break
 
             case 'os': // order snapshot
+            case 'oc': // order cancel
+            case 'on': // order new
+            case 'ou': // order update
                 break
 
             // Unknown
@@ -360,6 +376,36 @@ class PrivateSocket extends BaseSocket {
         this.emit(`${event}-trade`, trade)
     }
 
+    /**
+     * Broadcasts an update wallet event
+     * @param {*} wallet
+     */
+    broadcastWallet(wallet) {
+        this.emit('update-wallet', wallet)
+    }
+
+    /**
+     * Broadcasts an update wallet event
+     * @param {*} position
+     */
+    broadcastPosition(position, event) {
+        this.emit(`${event}-position`, position)
+    }
+
+    /**
+     * Converts raw data into a wallet balance
+     * @param {*} w
+     * @returns
+     */
+    rawToWallet(w) {
+        return {
+            type: w[0],
+            currency: w[1],
+            balance: w[2],
+            unsettledInterest: w[3],
+            available: w[4],
+        }
+    }
     /**
      * array to a Trade
      * @param {*} t

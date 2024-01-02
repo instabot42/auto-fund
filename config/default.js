@@ -36,6 +36,10 @@ module.exports = {
     // Ideally have this true the first time you run it, so you can see what would happen
     dryRun: true,
 
+    // Should wallet balance and position summaries be shown in output
+    // set to false to skip showing the wallet and position summaries
+    showWalletPosition: true,
+
     // Which strategy should be used to replace funds. Can be one of...
     // 'replace' - look for new funding offers that are cheaper and try and take them
     // 'target' - Aim to get all borrowing under a target rate, and then move to a cheaper rate.

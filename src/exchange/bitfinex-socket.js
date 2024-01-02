@@ -9,6 +9,12 @@ class BaseSocket extends EventEmitter {
 
         // setting from config
         this.symbol = config.get('bitfinex.symbol')
+        if (!this.symbol.startsWith('f')) {
+            throw new Error('Funding Symbols must start with f, eg fUSD')
+        }
+
+        // work out the quote currency from the symbol
+        this.quoteCurrency = this.symbol.substring(1).toUpperCase()
 
         this.isClosing = false
 
@@ -40,6 +46,17 @@ class BaseSocket extends EventEmitter {
     nextMsgId() {
         this.msgId += 1
         return this.msgId
+    }
+
+    /**
+     * Just wait a bit
+     * @param {*} ms
+     * @returns
+     */
+    sleep(ms) {
+        return new Promise((resolve) => {
+            setTimeout(() => resolve(), ms)
+        })
     }
 
     /**

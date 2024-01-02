@@ -82,11 +82,15 @@ class TargetApp extends App {
             const borrow = this.tooExpensive.find((b) => b.amount <= this.pendingReturn + 1)
             if (borrow) {
                 // return this borrowing
-                log(`Return borrow of ${borrow.amount}`)
                 qtyReturned += borrow.amount
                 this.pendingReturn -= borrow.amount
+                if (this.pendingReturn < 0) {
+                    this.pendingReturn = 0
+                }
+
                 this.tooExpensive = this.tooExpensive.filter((b) => b.id !== borrow.id)
                 await this.borrowReturn([borrow])
+
 
                 if (this.pendingReturn > 0 && this.tooExpensive.length > 0) {
                     keepLooking = true
@@ -117,6 +121,7 @@ class TargetApp extends App {
                 return
             }
 
+            log('\nLooking for borrows that exceed our target rates list...')
             for (const ratePercent of this.targetRates) {
                 const rate = ratePercent / 365 / 100
                 this.tooExpensive = this.borrows.filter((b) => b.rate > rate)
@@ -127,6 +132,7 @@ class TargetApp extends App {
                     // Find out how much is too expensive
                     const toBorrow = amountToReplace - this.pendingReturn
                     log(`>> Want to replace: ${this.f4(amountToReplace)}`)
+                    this.tooExpensive.forEach((b) => log(` [${b.id}] for ${this.f2(b.amount)} @ ${b.ratePercent}`))
                     log(`>> Unspent fills:   ${this.f4(this.pendingReturn)}`)
                     log(`>> Borrow Now:      ${this.f4(toBorrow)}`)
 

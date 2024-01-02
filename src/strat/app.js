@@ -23,16 +23,22 @@ class App {
         this.socket.on('execute-trade', (trade) => this.onExecuteTrade(trade))
         this.socket.on('update-trade', (trade) => this.onUpdateTrade(trade))
 
+        this.socket.on('update-wallet', (wallet) => this.onUpdateWallet(wallet))
+        this.socket.on('update-position', (position) => this.onUpdatePosition(position))
+
         // some settings
         this.interval = config.get('interval')
         this.minImprovement = config.get('minImprovement')
         this.minBorrowSize = config.get('minBorrowSize')
+        this.showWalletPosition = config.get('showWalletPosition')
         this.symbol = config.get('bitfinex.symbol')
 
         // the order book and loan book
         this.borrows = []
         this.offers = []
         this.orders = []
+        this.wallets = []
+        this.positions = []
 
         this.netUsing = 0
         this.netUnused = 0
@@ -88,6 +94,24 @@ class App {
      */
     async beforeShutdown() {
         log(`Stopping App...`)
+    }
+
+    /**
+     * CAlled when the wallet balance is updated by the exchange
+     * @param {*} wallet
+     */
+    onUpdateWallet(wallet) {
+        this.wallets = this.wallets.filter((w) => w.type !== wallet.type && w.currency !== wallet.currency)
+        this.wallets.push(wallet)
+    }
+
+    /**
+     * Called when the position is updated by the exchange
+     * @param {*} position
+     */
+    onUpdatePosition(position) {
+        this.positions = this.positions.filter((p) => p.id != position.id)
+        this.positions.push(position)
     }
 
     /**
@@ -175,15 +199,13 @@ class App {
      * Called when a trade is executed
      * @param {*} trade
      */
-    onExecuteTrade(trade) {
-    }
+    onExecuteTrade(trade) {}
 
     /**
      * Called when a trade is executed
      * @param {*} trade
      */
-    onUpdateTrade(trade) {
-    }
+    onUpdateTrade(trade) {}
 
     /**
      * Called from time to time to log out the state of things
@@ -239,8 +261,7 @@ class App {
             return
         }
 
-        const ids = items.map((b) => b.id)
-        await this.socket.borrowReturn(ids)
+        await this.socket.borrowReturn(items)
     }
 
     /**
@@ -362,6 +383,26 @@ class App {
      * Bundle up all the data for logging, out of the way
      */
     logBorrowState() {
+        log(`\n${new Date()}`)
+
+        if (this.showWalletPosition) {
+            log('\nWallet')
+            this.wallets.forEach((w) => {
+                log(`${w.currency} ${w.type} : ${this.f4(w.balance)}`)
+            })
+
+            log('\nPositions')
+            this.positions.forEach((p) => {
+                const cost = p.amount * p.basePrice
+                log(`${p.symbol} ${this.f4(p.amount)} @ ${this.f2(p.basePrice)}, cost ${this.f2(cost)}`)
+            })
+
+            const sumOfBalances = this.wallets.reduce((sum, w) => sum + w.balance, 0)
+            const sumOfPositions = this.positions.reduce((sum, p) => sum + p.amount * p.basePrice, 0)
+            const neededBorrowing = sumOfPositions > sumOfBalances ? sumOfPositions - sumOfBalances : 0
+            log(`Sum of positions: ${this.f2(sumOfPositions)}. Expected Borrowing: ${this.f2(neededBorrowing)}`)
+        }
+
         const borrows = this.borrows
         const book = this.offers
 
@@ -375,13 +416,15 @@ class App {
         const scaledRate = borrows.reduce((sum, b) => sum + b.rate * b.amount, 0)
         const totalBorrowed = borrows.reduce((sum, b) => sum + b.amount, 0)
         const avgRate = scaledRate / totalBorrowed
-        log(`\n${new Date()}`)
+
+        log('\nBorrows')
         log(`${borrows.length} active borrows. Next expiry in ${timeRemaining}...`)
         log(`Worst : ${this.apr(top.rate)}% APR (${this.f8(top.rate)}). ${this.f4(top.amount)} ${this.symbol} used`)
         log(`Best  : ${this.apr(last.rate)}% APR (${this.f8(last.rate)}). ${this.f4(last.amount)} ${this.symbol} used`)
         log(`Avg   : ${this.apr(avgRate)}% APR (${this.f8(avgRate)}). ${this.f4(totalBorrowed)} ${this.symbol} total used`)
         log(`Best Offer   : ${this.apr(lowRate)}% APR (${this.f8(lowRate)}). ${this.f4(this.offers[0].amount)} available`)
         log(`Net          : Using: ${this.f2(this.netUsing)}, Unused: ${this.f2(this.netUnused)}`)
+        log('')
 
         this.eventCount = 0
     }
