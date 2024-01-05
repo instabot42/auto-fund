@@ -192,7 +192,7 @@ class App {
     onCancelOrder(order) {
         this.orders = this.orders.filter((o) => o.id !== order.id)
         this.eventCount += 1
-        log(`Offer id ${order.id} for ${this.f4(Math.abs(order.amount))} has been cancelled.`)
+        log(`Offer id ${order.id} for ${this.f4(Math.abs(order.amount))} has been closed (cancelled or filled).`)
     }
 
     /**
@@ -256,12 +256,21 @@ class App {
      * return some borrowing
      * @param {*} items
      */
-    async borrowReturn(items) {
+    async returnManyBorrows(items) {
         if (items.length === 0) {
             return
         }
 
-        await this.socket.borrowReturn(items)
+        await this.socket.returnManyBorrows(items)
+    }
+
+    /**
+     * Return a single item of borrowing
+     * @param {*} borrow
+     * @returns
+     */
+    async returnBorrow(borrow) {
+        return this.socket.returnBorrow(borrow)
     }
 
     /**

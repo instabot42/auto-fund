@@ -157,7 +157,7 @@ class ReplaceIfCheaperApp extends App {
             // we got some trades against our order, so return all the borrows we are trying to replace
             // we might not have filled all of it, but the exchange will take care of that by re-borrowing if needed
             const toReturn = this.borrowsToReturn(toReplace)
-            await this.borrowReturn(toReturn)
+            await this.returnManyBorrows(toReturn)
         }
 
         // wait for everything to settle.

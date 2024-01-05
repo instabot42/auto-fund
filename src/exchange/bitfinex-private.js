@@ -56,24 +56,34 @@ class PrivateSocket extends BaseSocket {
      * Returns the listed borrows (closing the funding borrowed)
      * @param {*} ids
      */
-    async borrowReturn(borrows) {
+    async returnManyBorrows(borrows) {
+        for (const b of borrows) {
+            await this.returnBorrow(b)
+        }
+    }
+
+    /**
+     * Returns the listed borrows (closing the funding borrowed)
+     * @param {*} ids
+     */
+    async returnBorrow(borrow) {
         if (this.dryRun) {
-            log(`DRYRUN: not returning ${borrows.length} loans`)
-            return
+            log(`DRYRUN: not returning loan ${borrow.id}`)
+            return true
         }
 
-        for (const b of borrows) {
-            try {
-                await this.apiLock.runLocked(async () => {
-                    // https://docs.bitfinex.com/reference/rest-auth-funding-close
-                    // /v2/auth/w/funding/close
-                    log(`==Request to return borrowing id ${b.id} for ${b.amount} ${b.status}`)
-                    await this.httpCall('post', '/v2/auth/w/funding/close', { id: b.id })
-                })
-            } catch (err) {
-                // Just eat the error and log it
-                log(`Error trying to return borrowing`, b)
-            }
+        try {
+            await this.apiLock.runLocked(async () => {
+                // https://docs.bitfinex.com/reference/rest-auth-funding-close
+                // /v2/auth/w/funding/close
+                log(`==Request to return borrowing id ${borrow.id} for ${borrow.amount.toFixed(4)} ${borrow.status}`)
+                await this.httpCall('post', '/v2/auth/w/funding/close', { id: borrow.id })
+                return true
+            })
+        } catch (err) {
+            // Just eat the error and log it
+            log(`Error trying to return borrowing`, borrow)
+            return false
         }
     }
 
@@ -449,6 +459,7 @@ class PrivateSocket extends BaseSocket {
             rateFixed: o[14].toFixed(8),
             ratePercent: (o[14] * 365 * 100).toFixed(4),
             period: o[15],
+            createdAtHuman: this.msToHuman(o[2]),
         }
     }
 
@@ -475,6 +486,8 @@ class PrivateSocket extends BaseSocket {
             ratePercent: (rate * 365 * 100).toFixed(4),
             period: f[12],
             pair: f[21] ? f[21] : 'none',
+            createdAtHuman: this.msToHuman(f[3]),
+            expiresAtHuman: this.msToHuman(f[13] + f[12] * 1000 * 60 * 60 * 24),
         }
     }
 
@@ -528,7 +541,13 @@ class PrivateSocket extends BaseSocket {
             collateral: pos[17],
             collatoralMin: pos[18],
             meta: pos[19],
+            createdAtHuman: this.msToHuman(pos[12]),
         }
+    }
+
+    msToHuman(timestamp) {
+        const d = new Date(timestamp)
+        return d.toISOString()
     }
 
     /**

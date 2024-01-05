@@ -57,14 +57,14 @@ class TargetApp extends App {
                 const executed = filled - this.filledSoFar
                 const remains = Math.abs(order.amountRemaining)
                 const amt = Math.abs(order.amount)
-                log(`Fill Detected: ${this.f4(executed)}. ${this.f4(remains)} still to fill of ${this.f4(amt)}`)
+                log(`Fill Detected: ${this.f4(executed)}.\n${this.f4(remains)} still to fill of ${this.f4(amt)}`)
 
                 // Update what we know about how much as been filled so far
                 this.filledSoFar = filled
 
                 // see the executed amount
                 this.pendingReturn += executed
-                log(`Pending return ${this.pendingReturn}`)
+                log(`Pending return ${this.f4(this.pendingReturn)}\n`)
                 await this.returnExcessBorrows()
             }
         })
@@ -88,9 +88,20 @@ class TargetApp extends App {
                     this.pendingReturn = 0
                 }
 
+                // remove it from the set
                 this.tooExpensive = this.tooExpensive.filter((b) => b.id !== borrow.id)
-                await this.borrowReturn([borrow])
 
+                // As the borrows can change (moving from unused to using for example)
+                // we actually just look for any borrow of the same size and rate in the active list, and discard that one
+                const returnMe = this.borrows.find(
+                    (b) => b.rateFixed === borrow.rateFixed && b.amount === borrow.amount && b.period === borrow.period
+                )
+                if (returnMe) {
+                    await this.returnBorrow(returnMe)
+                    await this.sleep(100)
+                } else {
+                    log('unable to find a borrow that matches. Seeking:', borrow)
+                }
 
                 if (this.pendingReturn > 0 && this.tooExpensive.length > 0) {
                     keepLooking = true
@@ -108,10 +119,18 @@ class TargetApp extends App {
     async onTimer() {
         super.onTimer()
 
-        this.fillLock.runLocked(async () => {
+        await this.fillLock.runLocked(async () => {
             // cancel any open orders
             await this.cancelAllOrders()
+            log('')
+        })
 
+        // Cancelling orders can queue up fill locked work,
+        // so wait a moment so all that can be cleared
+        await this.sleep(2000)
+
+        // Next try and borrow something to replace existing expensive stuff
+        await this.fillLock.runLocked(async () => {
             // reset the list of borrows etc
             this.tooExpensive = []
             this.filledSoFar = 0
@@ -121,12 +140,16 @@ class TargetApp extends App {
                 return
             }
 
-            log('\nLooking for borrows that exceed our target rates list...')
+            log('Looking for borrows that exceed our target rates list...')
             for (const ratePercent of this.targetRates) {
                 const rate = ratePercent / 365 / 100
                 this.tooExpensive = this.borrows.filter((b) => b.rate > rate)
                 const amountToReplace = this.tooExpensive.reduce((s, b) => s + b.amount, 0)
-                log(`Found ${this.tooExpensive.length} borrows > ${this.apr(rate)}% (${this.f8(rate)}) for ${this.f2(amountToReplace)} ${this.symbol}`)
+                log(
+                    `Found ${this.tooExpensive.length} borrows > ${this.apr(rate)}% (${this.f8(rate)}) for ${this.f2(amountToReplace)} ${
+                        this.symbol
+                    }`
+                )
 
                 if (this.tooExpensive.length > 0) {
                     // Find out how much is too expensive
@@ -134,18 +157,17 @@ class TargetApp extends App {
                     log(`>> Want to replace: ${this.f4(amountToReplace)}`)
                     this.tooExpensive.forEach((b) => log(` [${b.id}] for ${this.f2(b.amount)} @ ${b.ratePercent}`))
                     log(`>> Unspent fills:   ${this.f4(this.pendingReturn)}`)
-                    log(`>> Borrow Now:      ${this.f4(toBorrow)}`)
+                    log(`>> Borrow Now:      ${this.f4(toBorrow)}\n`)
 
                     // place an order to borrow that much at that rate
-                    if (toBorrow > 0) {
+                    if (toBorrow > 0 && toBorrow >= this.minBorrowSize) {
                         this.borrowFunds(toBorrow, rate)
+                        return
                     }
-
-                    return
                 }
             }
 
-            log('Nothing to do yet...')
+            log('Nothing to do yet...\n')
         })
     }
 
@@ -161,9 +183,14 @@ class TargetApp extends App {
      * Cancels all open orders and waits for them to complete (well, waits a bit anyway)
      */
     async cancelAllOrders() {
+        if (this.orders.length === 0) {
+            return
+        }
+
         // cancel any open orders
         this.socket.cancelOffers(this.orders.map((o) => o.id))
 
+        // Wait around for them to be cleared out
         let tries = 0
         while (tries < 10 && this.orders.length > 0) {
             tries += 1
